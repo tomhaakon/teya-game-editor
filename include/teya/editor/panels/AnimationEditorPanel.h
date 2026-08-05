@@ -32,12 +32,13 @@ class AnimationEditorPanel final : public Panel {
     void inspector(EditorHost &);
     void actionBindings();
     void frameSourcePicker();
+    void attachmentObjects(EditorHost &);
     void spriteSheetPicker();
     void atlasPicker();
     void timeline();
     void frameCollections(EditorHost &, teya::animation::AnimationFrame &);
     bool loaded_ = false, active_ = false, timelineOpen_ = true, playing_ = false, fit_ = false,
-         showGrid_ = true, onionPrevious_ = false, onionNext_ = false;
+         showGrid_ = true, showSockets_ = true, onionPrevious_ = false, onionNext_ = false;
     float zoom_ = 4, opacity_ = .25f;
     Vector2 pan_{};
     AnimationDocument document_;
@@ -54,6 +55,10 @@ class AnimationEditorPanel final : public Panel {
     float sheetPickerZoom_ = 1.0f;
     float importedFrameDuration_ = 0.1f;
     std::array<char, 96> atlasSearch_{};
+    std::vector<AttachmentPreviewInfo> attachmentObjects_;
+    std::uint64_t attachmentAssetId_ = 0;
+    std::size_t selectedAttachment_ = 0;
+    std::string attachmentMessage_;
     bool socketDragActive_ = false, socketDragChanged_ = false;
     std::size_t socketDragClip_ = 0, socketDragFrame_ = 0, socketDragIndex_ = 0;
     Vector2 socketDragOffset_{};

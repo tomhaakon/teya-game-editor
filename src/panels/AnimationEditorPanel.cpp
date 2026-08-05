@@ -109,6 +109,11 @@ void AnimationEditorPanel::load(EditorHost &h, std::uint64_t id) {
     zoom_ = 4.0f;
     sheetSelection_.clear();
     sheetSelectionAnchor_ = -1;
+    attachmentObjects_ = h.attachmentPreviews(id);
+    attachmentAssetId_ = id;
+    selectedAttachment_ = std::min(selectedAttachment_,
+                                   attachmentObjects_.empty() ? std::size_t{0}
+                                                              : attachmentObjects_.size() - 1);
     validate(h);
     previewRevision_ = ~std::uint64_t{0};
     message_ = "Loaded working copy";
@@ -591,6 +596,10 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
         applyTemporary(h);
     ImGui::SameLine();
     frameSourcePicker();
+    ImGui::SameLine();
+    if (ImGui::Button("Attachment Objects..."))
+        ImGui::OpenPopup("Attachment Objects");
+    attachmentObjects(h);
     if (document_.temporaryApplied()) {
         ImGui::TextColored({1, .6f, .1f, 1}, "Temporary runtime asset");
     }
@@ -609,6 +618,131 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
     }
     if (!message_.empty())
         ImGui::TextWrapped("%s", message_.c_str());
+}
+
+void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
+    ImGui::SetNextWindowSize({760, 560}, ImGuiCond_Appearing);
+    if (!ImGui::BeginPopupModal("Attachment Objects", nullptr, ImGuiWindowFlags_NoSavedSettings))
+        return;
+    ImGui::TextDisabled("Reusable objects follow an animation socket. Changes apply when saved.");
+    if (ImGui::Button("+ Object")) {
+        AttachmentPreviewInfo object;
+        object.id = attachmentObjects_.empty() ? 1 : attachmentObjects_.back().id + 1;
+        object.name = "New Object";
+        object.socketName = "weapon_hand";
+        attachmentObjects_.push_back(std::move(object));
+        selectedAttachment_ = attachmentObjects_.size() - 1;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Duplicate") && selectedAttachment_ < attachmentObjects_.size()) {
+        auto copy = attachmentObjects_[selectedAttachment_];
+        copy.id = attachmentObjects_.empty() ? 1 : attachmentObjects_.back().id + 1;
+        copy.name += " Copy";
+        copy.ownsTexture = false;
+        attachmentObjects_.push_back(std::move(copy));
+        selectedAttachment_ = attachmentObjects_.size() - 1;
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete") && selectedAttachment_ < attachmentObjects_.size()) {
+        attachmentObjects_.erase(attachmentObjects_.begin() + selectedAttachment_);
+        selectedAttachment_ = std::min(selectedAttachment_,
+                                       attachmentObjects_.empty() ? std::size_t{0}
+                                                                  : attachmentObjects_.size() - 1);
+    }
+    ImGui::Separator();
+    if (ImGui::BeginTable("attachment-object-layout", 2, ImGuiTableFlags_Resizable |
+                                                           ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableSetupColumn("Objects", ImGuiTableColumnFlags_WidthFixed, 190);
+        ImGui::TableSetupColumn("Object", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        for (std::size_t i = 0; i < attachmentObjects_.size(); ++i)
+            if (ImGui::Selectable(attachmentObjects_[i].name.c_str(), i == selectedAttachment_))
+                selectedAttachment_ = i;
+        ImGui::TableNextColumn();
+        if (selectedAttachment_ < attachmentObjects_.size()) {
+            auto &object = attachmentObjects_[selectedAttachment_];
+            auto name = buffer<96>(object.name);
+            if (ImGui::InputText("Name", name.data(), name.size()))
+                object.name = name.data();
+            auto texturePath = buffer<256>(object.texturePath);
+            if (ImGui::InputText("Texture", texturePath.data(), texturePath.size()))
+                object.texturePath = texturePath.data();
+            auto socketName = buffer<96>(object.socketName);
+            if (ImGui::BeginCombo("Socket", object.socketName.c_str())) {
+                const auto &asset = document_.asset();
+                if (!asset.clips.empty() && !asset.clips[document_.selection().clip].frames.empty()) {
+                    const auto &sockets = asset.clips[document_.selection().clip]
+                                              .frames[document_.selection().frame]
+                                              .sockets;
+                    for (const auto &socket : sockets)
+                        if (ImGui::Selectable(socket.name.c_str(), socket.name == object.socketName))
+                            object.socketName = socket.name;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::InputText("Socket name", socketName.data(), socketName.size()))
+                object.socketName = socketName.data();
+            ImGui::DragFloat2("Pivot", &object.pivot.x, .25f, 0, 0, "%.2f");
+            ImGui::DragFloat2("Position offset", &object.positionOffset.x, .25f, -1000, 1000,
+                              "%.2f");
+            ImGui::DragFloat("Rotation offset", &object.rotationOffsetDegrees, .25f, -360, 360,
+                             "%.2f deg");
+            ImGui::DragFloat2("Scale", &object.scale.x, .01f, .01f, 100, "%.3f");
+            ImGui::Checkbox("Visible", &object.visible);
+            int layer = object.layer == teya::animation::AttachmentLayer::BehindOwner ? 0 : 1;
+            if (ImGui::Combo("Layer", &layer, "Behind Owner\0In Front Of Owner\0"))
+                object.layer = layer == 0 ? teya::animation::AttachmentLayer::BehindOwner
+                                          : teya::animation::AttachmentLayer::InFrontOfOwner;
+            ImGui::SeparatorText("Pivot preview");
+            if (IsTextureValid(object.texture)) {
+                const float maxSide = 220.0f;
+                const float scale = std::min(1.0f, maxSide / std::max(object.texture.width,
+                                                                      object.texture.height));
+                const ImVec2 size{object.texture.width * scale, object.texture.height * scale};
+                ImGui::Image((ImTextureID)object.texture.id, size);
+                const auto imageMin = ImGui::GetItemRectMin();
+                const ImVec2 pivot{imageMin.x + object.pivot.x * scale,
+                                   imageMin.y + object.pivot.y * scale};
+                auto *draw = ImGui::GetWindowDrawList();
+                draw->AddLine({pivot.x - 7, pivot.y}, {pivot.x + 7, pivot.y},
+                              IM_COL32(255, 220, 0, 255), 2);
+                draw->AddLine({pivot.x, pivot.y - 7}, {pivot.x, pivot.y + 7},
+                              IM_COL32(255, 220, 0, 255), 2);
+                if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                    const auto mouse = ImGui::GetIO().MousePos;
+                    object.pivot = {(mouse.x - imageMin.x) / scale,
+                                    (mouse.y - imageMin.y) / scale};
+                }
+                ImGui::TextDisabled("Click the image at the point held by the hand.");
+            } else
+                ImGui::TextDisabled("Save a valid texture path to load the pivot preview.");
+        }
+        ImGui::EndTable();
+    }
+    ImGui::Separator();
+    if (ImGui::Button("Save Objects")) {
+        auto result = host.saveAttachmentObjects(document_.assetId(), attachmentObjects_);
+        attachmentMessage_ = result ? "Attachment objects saved and applied"
+                                    : result.error;
+        if (result) {
+            attachmentObjects_ = host.attachmentPreviews(document_.assetId());
+            selectedAttachment_ = std::min(selectedAttachment_,
+                                           attachmentObjects_.empty() ? std::size_t{0}
+                                                                      : attachmentObjects_.size() - 1);
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Reload Objects")) {
+        attachmentObjects_ = host.attachmentPreviews(document_.assetId());
+        attachmentMessage_ = "Attachment objects reloaded";
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Close"))
+        ImGui::CloseCurrentPopup();
+    if (!attachmentMessage_.empty())
+        ImGui::TextWrapped("%s", attachmentMessage_.c_str());
+    ImGui::EndPopup();
 }
 void AnimationEditorPanel::clips() {
     auto &a = document_.asset();
@@ -677,6 +811,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     ImGui::Checkbox("Fit", &fit_);
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &showGrid_);
+    ImGui::SameLine();
+    ImGui::Checkbox("Show sockets", &showSockets_);
     ImGui::Checkbox("Prev onion", &onionPrevious_);
     ImGui::SameLine();
     ImGui::Checkbox("Next onion", &onionNext_);
@@ -715,9 +851,57 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     const float vBottom = (source->y + source->height) / static_cast<float>(texture_.height);
     const ImVec2 uv0{mirrored ? uRight : uLeft, vTop};
     const ImVec2 uv1{mirrored ? uLeft : uRight, vBottom};
-    ImGui::Image((ImTextureID)texture_.id, size, uv0, uv1);
-    ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+    ImVec2 min = pos, max{pos.x + size.x, pos.y + size.y};
     auto *dl = ImGui::GetWindowDrawList();
+    auto drawAttachmentLayer = [&](teya::animation::AttachmentLayer layer) {
+        for (const auto &object : attachmentObjects_) {
+            if (!object.visible || object.layer != layer || !IsTextureValid(object.texture))
+                continue;
+            auto socketIt = std::find_if(frame.sockets.begin(), frame.sockets.end(),
+                                         [&](const auto &socket) {
+                                             return socket.name == object.socketName;
+                                         });
+            if (socketIt == frame.sockets.end() || !socketIt->visible)
+                continue;
+            auto socket = mirrored ? teya::animation::mirrorSocket(*socketIt, source->width)
+                                   : *socketIt;
+            const float angleDegrees = socket.rotationDegrees +
+                                       (mirrored ? -object.rotationOffsetDegrees
+                                                 : object.rotationOffsetDegrees);
+            const float angle = angleDegrees * DEG2RAD;
+            const float cosine = std::cos(angle), sine = std::sin(angle);
+            const float sx = socket.scale.x * object.scale.x * z;
+            const float sy = socket.scale.y * object.scale.y * z;
+            const Vector2 offset{mirrored ? -object.positionOffset.x : object.positionOffset.x,
+                                 object.positionOffset.y};
+            const ImVec2 anchor{min.x + (socket.position.x + offset.x) * z,
+                                min.y + (socket.position.y + offset.y) * z};
+            const float pivotX = mirrored ? object.texture.width - object.pivot.x
+                                          : object.pivot.x;
+            auto corner = [&](float x, float y) {
+                x = (x - pivotX) * sx;
+                y = (y - object.pivot.y) * sy;
+                return ImVec2{anchor.x + x * cosine - y * sine,
+                              anchor.y + x * sine + y * cosine};
+            };
+            const ImVec2 p0 = corner(0, 0);
+            const ImVec2 p1 = corner(static_cast<float>(object.texture.width), 0);
+            const ImVec2 p2 = corner(static_cast<float>(object.texture.width),
+                                     static_cast<float>(object.texture.height));
+            const ImVec2 p3 = corner(0, static_cast<float>(object.texture.height));
+            const ImVec2 textureTopLeft = mirrored ? ImVec2{1, 0} : ImVec2{0, 0};
+            const ImVec2 textureTopRight = mirrored ? ImVec2{0, 0} : ImVec2{1, 0};
+            const ImVec2 textureBottomRight = mirrored ? ImVec2{0, 1} : ImVec2{1, 1};
+            const ImVec2 textureBottomLeft = mirrored ? ImVec2{1, 1} : ImVec2{0, 1};
+            dl->AddImageQuad((ImTextureID)object.texture.id, p0, p1, p2, p3, textureTopLeft,
+                             textureTopRight, textureBottomRight, textureBottomLeft);
+        }
+    };
+    drawAttachmentLayer(teya::animation::AttachmentLayer::BehindOwner);
+    ImGui::Image((ImTextureID)texture_.id, size, uv0, uv1);
+    min = ImGui::GetItemRectMin();
+    max = ImGui::GetItemRectMax();
+    drawAttachmentLayer(teya::animation::AttachmentLayer::InFrontOfOwner);
     dl->AddRect(min, max, IM_COL32(255, 255, 255, 180));
     if (showGrid_ && pixel && z >= 4) {
         for (int x = 1; x < (int)source->width; ++x)
@@ -727,18 +911,19 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             dl->AddLine({min.x, min.y + y * z}, {max.x, min.y + y * z},
                         IM_COL32(255, 255, 255, 25));
     }
-    for (size_t i = 0; i < frame.sockets.size(); ++i) {
-        auto socket = mirrored ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
-                               : frame.sockets[i];
-        ImVec2 p{min.x + socket.position.x * z, min.y + socket.position.y * z};
-        ImU32 color = s.kind == AnimationSelection::Kind::Socket && s.item == i
-                          ? IM_COL32(255, 255, 0, 255)
-                          : IM_COL32(0, 220, 255, 255);
-        dl->AddCircleFilled(p, 5, color);
-        float r = socket.rotationDegrees * DEG2RAD;
-        dl->AddLine(p, {p.x + std::cos(r) * 20, p.y + std::sin(r) * 20}, color, 2);
-        dl->AddText({p.x + 6, p.y - 8}, color, socket.name.c_str());
-    }
+    if (showSockets_)
+        for (size_t i = 0; i < frame.sockets.size(); ++i) {
+            auto socket = mirrored ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
+                                   : frame.sockets[i];
+            ImVec2 p{min.x + socket.position.x * z, min.y + socket.position.y * z};
+            ImU32 color = s.kind == AnimationSelection::Kind::Socket && s.item == i
+                              ? IM_COL32(255, 255, 0, 255)
+                              : IM_COL32(0, 220, 255, 255);
+            dl->AddCircleFilled(p, 5, color);
+            float r = socket.rotationDegrees * DEG2RAD;
+            dl->AddLine(p, {p.x + std::cos(r) * 20, p.y + std::sin(r) * 20}, color, 2);
+            dl->AddText({p.x + 6, p.y - 8}, color, socket.name.c_str());
+        }
     for (size_t i = 0; i < frame.hitboxes.size(); ++i) {
         auto b = mirrored ? teya::animation::mirrorRectangle(frame.hitboxes[i].localBounds,
                                                              source->width)
@@ -766,7 +951,7 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     auto mouseLocal = [&] {
         return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, mirrored, source->width);
     };
-    if (previewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (showSockets_ && previewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
         for (std::size_t i = 0; i < frame.sockets.size(); ++i) {
@@ -1258,7 +1443,9 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
                     c = true;
                 }
                 c |= editVec2("Position", x.position);
-                c |= ImGui::InputFloat("Rotation", &x.rotationDegrees, 0, 0, "%.3f");
+                c |= ImGui::InputFloat("Rotation", &x.rotationDegrees, 0, 0, "%.3f deg");
+                c |= ImGui::SliderFloat("Rotation slider", &x.rotationDegrees, -180.0f, 180.0f,
+                                        "%.1f deg");
                 c |= ImGui::InputFloat2("Scale", &x.scale.x, "%.4f");
                 c |= ImGui::Checkbox("Visible", &x.visible);
                 int layer = x.layer == teya::animation::AttachmentLayer::BehindOwner ? 0 : 1;

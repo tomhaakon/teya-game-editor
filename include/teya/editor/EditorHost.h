@@ -52,10 +52,24 @@ struct AnimationSaveResult {
     explicit operator bool() const { return saved && applied; }
 };
 struct AttachmentPreviewInfo {
+    std::uint64_t id = 0;
+    std::string name;
     std::string socketName;
+    std::string texturePath;
     Texture2D texture{};
     Vector2 pivot{};
+    Vector2 positionOffset{};
+    float rotationOffsetDegrees = 0.0f;
+    Vector2 scale{1.0f, 1.0f};
+    teya::animation::AttachmentLayer layer =
+        teya::animation::AttachmentLayer::InFrontOfOwner;
+    bool visible = true;
     bool ownsTexture = false;
+};
+struct AttachmentObjectSaveResult {
+    bool success = false;
+    std::string error;
+    explicit operator bool() const { return success; }
 };
 class EditorHost {
   public:
@@ -95,6 +109,10 @@ class EditorHost {
     }
     virtual std::vector<AttachmentPreviewInfo> attachmentPreviews(std::uint64_t) const {
         return {};
+    }
+    virtual AttachmentObjectSaveResult
+    saveAttachmentObjects(std::uint64_t, const std::vector<AttachmentPreviewInfo> &) {
+        return {false, "Attachment object editing is unavailable"};
     }
     virtual std::vector<std::string> animationEventSuggestions() const {
         return {"attack_started",  "attack_active", "spawn_slash",
