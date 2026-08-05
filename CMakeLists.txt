@@ -14,7 +14,7 @@ FetchContent_Declare(imgui
     GIT_SHALLOW TRUE)
 FetchContent_Declare(rlimgui
     GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
-    GIT_TAG 3.0
+    GIT_TAG Raylib_5_5
     GIT_SHALLOW TRUE)
 FetchContent_GetProperties(imgui)
 if(NOT imgui_POPULATED)
