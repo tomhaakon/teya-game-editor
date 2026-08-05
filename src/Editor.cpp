@@ -5,7 +5,23 @@
 #include <teya/core/Profile.h>
 namespace teya::editor {
 Editor::Editor(EditorHost&h):host_(h){} Editor::~Editor(){shutdown();}
-bool Editor::initialize(){if(initialized_)return true;rlImGuiSetup(true);ImGui::GetIO().ConfigFlags|=ImGuiConfigFlags_DockingEnable;firstLayout_=ImGui::GetIO().IniFilename&&GetFileLength(ImGui::GetIO().IniFilename)<=0;initialized_=true;return true;}
+bool Editor::initialize(){
+    if(initialized_)return true;
+    rlImGuiBeginInitImGui();
+    ImGui::StyleColorsDark();
+    auto& io=ImGui::GetIO();
+    io.Fonts->Clear();
+    ImFontConfig fontConfig;
+    fontConfig.SizePixels=20.0f;
+    fontConfig.PixelSnapH=true;
+    io.Fonts->AddFontDefault(&fontConfig);
+    rlImGuiEndInitImGui();
+    ImGui::GetStyle().ScaleAllSizes(1.25f);
+    io.ConfigFlags|=ImGuiConfigFlags_DockingEnable;
+    firstLayout_=io.IniFilename&&GetFileLength(io.IniFilename)<=0;
+    initialized_=true;
+    return true;
+}
 void Editor::shutdown(){if(initialized_){rlImGuiShutdown();initialized_=false;}}
 void Editor::menu(){if(ImGui::BeginMenuBar()){if(ImGui::BeginMenu("File")){if(ImGui::MenuItem("Exit"))host_.requestExit();ImGui::EndMenu();}if(ImGui::BeginMenu("View")){ImGui::MenuItem("Game View",nullptr,&gameView_.open);ImGui::MenuItem("Hierarchy",nullptr,&hierarchy_.open);ImGui::MenuItem("Inspector",nullptr,&inspector_.open);ImGui::MenuItem("Performance",nullptr,&performance_.open);ImGui::MenuItem("Animation Editor",nullptr,&animationEditor_.open);ImGui::MenuItem("ImGui Demo Window",nullptr,&showDemo_);ImGui::EndMenu();}if(ImGui::BeginMenu("Debug")){if(ImGui::MenuItem("Play"))context_.play();if(ImGui::MenuItem("Pause"))context_.pause();if(ImGui::MenuItem("Step One Frame"))context_.step();ImGui::Separator();ImGui::MenuItem("Capture Game Input",nullptr,&context_.settings.captureGameInput);ImGui::MenuItem("Show Player Origin",nullptr,false,false);ImGui::MenuItem("Show Colliders",nullptr,false,false);ImGui::EndMenu();}ImGui::EndMenuBar();}}
 void Editor::toolbar(){const char* mode=context_.simulationMode()==SimulationMode::Playing?"Playing":context_.simulationMode()==SimulationMode::Paused?"Paused":"Step";ImGui::Text("Simulation: %s",mode);ImGui::SameLine();if(ImGui::Button("Play"))context_.play();ImGui::SameLine();if(ImGui::Button("Pause"))context_.pause();ImGui::SameLine();if(ImGui::Button("Step"))context_.step();ImGui::SameLine();ImGui::Checkbox("Fit",&context_.settings.fitGameView);}
