@@ -10,7 +10,7 @@ endif()
 include(FetchContent)
 FetchContent_Declare(imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG v1.91.9b-docking
+    GIT_TAG v1.92.1-docking
     GIT_SHALLOW TRUE)
 FetchContent_Declare(rlimgui
     GIT_REPOSITORY https://github.com/raylib-extras/rlImGui.git
@@ -49,5 +49,6 @@ if(TEYA_GAME_EDITOR_BUILD_TESTS)
         src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp)
     target_compile_features(teya_game_editor_tests PRIVATE cxx_std_17)
     target_include_directories(teya_game_editor_tests PRIVATE include)
+    target_link_libraries(teya_game_editor_tests PRIVATE Teya::Core)
     add_test(NAME teya_game_editor_tests COMMAND teya_game_editor_tests)
 endif()
