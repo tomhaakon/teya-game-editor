@@ -43,6 +43,8 @@ void Editor::menu() {
             ImGui::MenuItem("Inspector", nullptr, &inspector_.open);
             ImGui::MenuItem("Performance", nullptr, &performance_.open);
             ImGui::MenuItem("Animation Editor", nullptr, &animationEditor_.open);
+            ImGui::MenuItem("Animation Timeline", nullptr, &animationEditor_.timelineOpen());
+            ImGui::MenuItem("Assets", nullptr, &assets_.open);
             ImGui::MenuItem("Console", nullptr, &console_.open);
             ImGui::MenuItem("ImGui Demo Window", nullptr, &showDemo_);
             ImGui::EndMenu();
@@ -118,11 +120,13 @@ void Editor::defaultLayout() {
     ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, .35f, &rightBottom, &right);
     ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, .25f, &centerBottom, &center);
     ImGui::DockBuilderDockWindow("Hierarchy", left);
+    ImGui::DockBuilderDockWindow("Assets", left);
     ImGui::DockBuilderDockWindow("Animation Editor", center);
     ImGui::DockBuilderDockWindow("Game View", center);
     ImGui::DockBuilderDockWindow("Inspector", right);
     ImGui::DockBuilderDockWindow("Performance", rightBottom);
     ImGui::DockBuilderDockWindow("Console", centerBottom);
+    ImGui::DockBuilderDockWindow("Animation Timeline", centerBottom);
     ImGui::DockBuilderFinish(dock);
     firstLayout_ = false;
 }
@@ -150,9 +154,15 @@ void Editor::draw() {
     ImGui::End();
     hierarchy_.draw(host_, context_);
     gameView_.draw(host_, context_);
-    inspector_.draw(host_, context_);
     performance_.draw(host_, context_);
     animationEditor_.draw(host_, context_);
+    if (animationEditor_.active())
+        animationEditor_.drawInspectorPanel(host_, inspector_.open);
+    else
+        inspector_.draw(host_, context_);
+    assets_.draw(host_, context_);
+    if (auto asset = assets_.consumeOpenRequest())
+        animationEditor_.openAsset(host_, *asset);
     console_.draw(host_, context_);
     if (focusGameView_) {
         ImGui::SetWindowFocus("Game View");

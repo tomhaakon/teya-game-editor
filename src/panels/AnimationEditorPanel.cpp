@@ -2,7 +2,9 @@
 #include "teya/editor/EditorContext.h"
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <imgui.h>
 #include <rlImGui.h>
@@ -21,6 +23,21 @@ const char *renderName(teya::animation::AnimationRenderMode m) {
 const char *filterName(teya::animation::AnimationTextureFilter f) {
     return f == teya::animation::AnimationTextureFilter::Nearest ? "Nearest" : "Linear";
 }
+const char *directionName(teya::animation::AnimationDirection direction) {
+    switch (direction) {
+    case teya::animation::AnimationDirection::Any:
+        return "Any";
+    case teya::animation::AnimationDirection::Down:
+        return "Down";
+    case teya::animation::AnimationDirection::Up:
+        return "Up";
+    case teya::animation::AnimationDirection::Right:
+        return "Right";
+    case teya::animation::AnimationDirection::Left:
+        return "Left";
+    }
+    return "Unknown";
+}
 float clipDuration(const teya::animation::AnimationClip &c) {
     float t = 0;
     for (auto &f : c.frames)
@@ -30,38 +47,50 @@ float clipDuration(const teya::animation::AnimationClip &c) {
 } // namespace
 void AnimationEditorPanel::draw(EditorHost &host, EditorContext &) {
     TEYA_PROFILE_ZONE_NAMED("AnimationEditorPanel::draw");
+    active_ = false;
     if (!open)
         return;
-    if (!ImGui::Begin("Animation Editor", &open)) {
-        ImGui::End();
-        return;
-    }
-    assets_ = host.editableAnimationAssets();
-    if (!loaded_ && !assets_.empty())
-        load(host, assets_[0].id);
-    assetBar(host);
-    if (loaded_) {
-        syncPreview();
-        shortcuts(host);
-        if (ImGui::BeginTable("animation-layout", 3,
-                              ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
-            ImGui::TableSetupColumn("Clips", ImGuiTableColumnFlags_WidthFixed, 180);
-            ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Inspector", ImGuiTableColumnFlags_WidthFixed, 330);
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            clips();
-            // Structural clip edits happen immediately. Refresh the immutable
-            // preview snapshot before it can write its old frame index back.
+    const bool mainVisible = ImGui::Begin("Animation Editor", &open);
+    active_ = mainVisible;
+    if (mainVisible) {
+        assets_ = host.editableAnimationAssets();
+        if (!loaded_ && !assets_.empty())
+            load(host, assets_[0].id);
+        assetBar(host);
+        if (loaded_) {
             syncPreview();
-            ImGui::TableNextColumn();
-            preview(host);
-            ImGui::TableNextColumn();
-            inspector(host);
-            ImGui::EndTable();
+            shortcuts(host);
+            if (!timelineOpen_ && ImGui::Button("Show Animation Timeline"))
+                timelineOpen_ = true;
+            if (ImGui::BeginTable("animation-layout", 2,
+                                  ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV)) {
+                ImGui::TableSetupColumn("Clips", ImGuiTableColumnFlags_WidthFixed, 200);
+                ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                clips();
+                // Structural clip edits happen immediately. Refresh the immutable
+                // preview snapshot before it can write its old frame index back.
+                syncPreview();
+                ImGui::TableNextColumn();
+                preview(host);
+                ImGui::EndTable();
+            }
         }
-        timeline();
     }
+    ImGui::End();
+
+    if (mainVisible && timelineOpen_) {
+        if (ImGui::Begin("Animation Timeline", &timelineOpen_) && loaded_)
+            timeline();
+        ImGui::End();
+    }
+}
+void AnimationEditorPanel::drawInspectorPanel(EditorHost &host, bool &panelOpen) {
+    if (!active_ || !panelOpen)
+        return;
+    if (ImGui::Begin("Inspector", &panelOpen) && loaded_)
+        inspector(host);
     ImGui::End();
 }
 void AnimationEditorPanel::load(EditorHost &h, std::uint64_t id) {
@@ -76,10 +105,380 @@ void AnimationEditorPanel::load(EditorHost &h, std::uint64_t id) {
     textureHeight_ = result.textureHeight;
     loaded_ = true;
     showGrid_ = document_.asset().authoring.showPixelGridByDefault;
-    fit_ = true;
+    fit_ = false;
+    zoom_ = 4.0f;
+    sheetSelection_.clear();
+    sheetSelectionAnchor_ = -1;
     validate(h);
     previewRevision_ = ~std::uint64_t{0};
     message_ = "Loaded working copy";
+}
+
+void AnimationEditorPanel::frameSourcePicker() {
+    auto &asset = document_.asset();
+    const bool grid =
+        asset.sourceMode == teya::animation::AnimationFrameSourceMode::SpriteSheetGrid;
+    if (ImGui::Button(grid ? "Open Sprite Sheet Picker..." : "Open Atlas Picker...")) {
+        if (grid && !asset.clips.empty()) {
+            sheetSelection_.clear();
+            const auto &clip = asset.clips[document_.selection().clip];
+            sheetSelection_.reserve(clip.frames.size());
+            for (const auto &frame : clip.frames)
+                sheetSelection_.push_back(frame.source.spriteIndex);
+            sheetSelectionAnchor_ = sheetSelection_.empty() ? -1 : sheetSelection_.back();
+        }
+        ImGui::OpenPopup("Frame Source Picker");
+    }
+
+    const auto &io = ImGui::GetIO();
+    ImGui::SetNextWindowSize(
+        {std::max(720.0f, io.DisplaySize.x * .82f), std::max(560.0f, io.DisplaySize.y * .82f)},
+        ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos({io.DisplaySize.x * .5f, io.DisplaySize.y * .5f}, ImGuiCond_Appearing,
+                            {.5f, .5f});
+    if (!ImGui::BeginPopupModal("Frame Source Picker", nullptr, ImGuiWindowFlags_NoSavedSettings))
+        return;
+
+    ImGui::Text("%s", grid ? "Sprite Sheet Grid" : "Texture Atlas");
+    ImGui::SameLine();
+    ImGui::TextDisabled("| Texture: %s | %d x %d", asset.texturePath.c_str(), textureWidth_,
+                        textureHeight_);
+    if (!asset.clips.empty()) {
+        const auto &selection = document_.selection();
+        const auto &clip = asset.clips[selection.clip];
+        ImGui::Text("Clip: %s | Current frame: %zu of %zu", clip.name.c_str(),
+                    clip.frames.empty() ? 0 : selection.frame + 1, clip.frames.size());
+    }
+    if (grid)
+        ImGui::TextDisabled("Cell: %d x %d | Saved columns: %d", asset.frameWidth,
+                            asset.frameHeight, asset.sheetColumns);
+    else
+        ImGui::TextDisabled("Authored regions: %zu", asset.atlasRegions.size());
+    ImGui::Separator();
+
+    if (!IsTextureValid(texture_))
+        ImGui::TextColored({1, .45f, .3f, 1},
+                           "The texture is unavailable. Asset metadata is still editable.");
+    else if (grid)
+        spriteSheetPicker();
+    else
+        atlasPicker();
+
+    ImGui::Separator();
+    if (ImGui::Button("Close"))
+        ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+void AnimationEditorPanel::spriteSheetPicker() {
+    auto &asset = document_.asset();
+    auto &selection = document_.selection();
+    if (asset.frameWidth <= 0 || asset.frameHeight <= 0 || textureWidth_ <= 0 ||
+        textureHeight_ <= 0) {
+        ImGui::TextUnformatted("Enter positive frame dimensions to divide the sheet.");
+        return;
+    }
+
+    const int actualColumns = textureWidth_ / asset.frameWidth;
+    const int rows = textureHeight_ / asset.frameHeight;
+    const int frameCount = actualColumns * rows;
+    if (actualColumns <= 0 || rows <= 0) {
+        ImGui::TextUnformatted("The selected cell size is larger than the texture.");
+        return;
+    }
+    if (asset.sheetColumns != actualColumns) {
+        ImGui::TextColored({1, .7f, .2f, 1}, "Saved columns: %d, texture-derived columns: %d",
+                           asset.sheetColumns, actualColumns);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Use derived columns")) {
+            auto before = asset;
+            asset.sheetColumns = actualColumns;
+            document_.mutate(before);
+        }
+    }
+
+    ImGui::SetNextItemWidth(100);
+    ImGui::SliderFloat("Sheet zoom", &sheetPickerZoom_, .25f, 8.0f, "%.2fx",
+                       ImGuiSliderFlags_Logarithmic);
+    ImGui::SetNextItemWidth(100);
+    ImGui::InputFloat("New frame duration", &importedFrameDuration_, 0, 0, "%.3f");
+    ImGui::TextDisabled("Ctrl: toggle  Shift: range  Drag: paint order");
+
+    if (ImGui::Button("Clear selection")) {
+        sheetSelection_.clear();
+        sheetSelectionAnchor_ = -1;
+    }
+    const bool canImport = !sheetSelection_.empty() && !asset.clips.empty() &&
+                           asset.sheetColumns == actualColumns &&
+                           std::isfinite(importedFrameDuration_) && importedFrameDuration_ > 0;
+    ImGui::BeginDisabled(!canImport);
+    if (ImGui::Button("Set clip frames from selection")) {
+        auto before = asset;
+        auto &frames = asset.clips[selection.clip].frames;
+        auto oldFrames = frames;
+        std::vector<bool> reused(oldFrames.size(), false);
+        std::vector<teya::animation::AnimationFrame> replacement;
+        replacement.reserve(sheetSelection_.size());
+        for (int index : sheetSelection_) {
+            auto found = oldFrames.end();
+            for (std::size_t i = 0; i < oldFrames.size(); ++i) {
+                if (!reused[i] && oldFrames[i].source.spriteIndex == index) {
+                    found = oldFrames.begin() + static_cast<std::ptrdiff_t>(i);
+                    reused[i] = true;
+                    break;
+                }
+            }
+            if (found != oldFrames.end()) {
+                replacement.push_back(*found);
+            } else {
+                teya::animation::AnimationFrame frame;
+                frame.source.spriteIndex = index;
+                frame.durationSeconds = importedFrameDuration_;
+                replacement.push_back(std::move(frame));
+            }
+        }
+        frames = std::move(replacement);
+        selection.frame = std::min(selection.frame, frames.size() - 1);
+        selection.kind = AnimationSelection::Kind::Frame;
+        document_.mutate(before);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Makes this ordered selection the clip's complete frame list. Existing "
+                          "matching frames keep their timing, sockets, events, hitboxes, and "
+                          "markers.");
+    if (ImGui::Button("Append selected to clip")) {
+        auto before = asset;
+        auto &frames = asset.clips[selection.clip].frames;
+        for (int index : sheetSelection_) {
+            teya::animation::AnimationFrame frame;
+            frame.source.spriteIndex = index;
+            frame.durationSeconds = importedFrameDuration_;
+            frames.push_back(std::move(frame));
+        }
+        selection.frame = frames.size() - 1;
+        selection.kind = AnimationSelection::Kind::Frame;
+        document_.mutate(before);
+    }
+    const bool hasCurrent = !asset.clips.empty() && !asset.clips[selection.clip].frames.empty();
+    ImGui::BeginDisabled(!hasCurrent);
+    if (ImGui::Button("Replace current frame")) {
+        auto before = asset;
+        asset.clips[selection.clip].frames[selection.frame].source.spriteIndex =
+            sheetSelection_.front();
+        document_.mutate(before);
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    ImGui::Text("%zu selected", sheetSelection_.size());
+
+    ImGui::BeginChild("sprite-sheet-scroll", {0, 340}, true, ImGuiWindowFlags_HorizontalScrollbar);
+    const float scale = std::max(.05f, sheetPickerZoom_);
+    const ImVec2 imageSize{textureWidth_ * scale, textureHeight_ * scale};
+    SetTextureFilter(texture_,
+                     asset.render.textureFilter == teya::animation::AnimationTextureFilter::Nearest
+                         ? TEXTURE_FILTER_POINT
+                         : TEXTURE_FILTER_BILINEAR);
+    rlImGuiImageRect(
+        &texture_, static_cast<int>(imageSize.x), static_cast<int>(imageSize.y),
+        Rectangle{0, 0, static_cast<float>(textureWidth_), static_cast<float>(textureHeight_)});
+    const ImVec2 imageMin = ImGui::GetItemRectMin();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const bool overImage = ImGui::IsItemHovered();
+    int hoveredIndex = -1;
+    if (overImage) {
+        const int column = static_cast<int>((mouse.x - imageMin.x) / (asset.frameWidth * scale));
+        const int row = static_cast<int>((mouse.y - imageMin.y) / (asset.frameHeight * scale));
+        if (column >= 0 && column < actualColumns && row >= 0 && row < rows)
+            hoveredIndex = row * actualColumns + column;
+    }
+    auto addInOrder = [&](int index) {
+        if (index < 0 || index >= frameCount)
+            return;
+        if (std::find(sheetSelection_.begin(), sheetSelection_.end(), index) ==
+            sheetSelection_.end())
+            sheetSelection_.push_back(index);
+    };
+    if (hoveredIndex >= 0 && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        if (ImGui::GetIO().KeyShift && sheetSelectionAnchor_ >= 0) {
+            sheetSelection_.clear();
+            const int direction = hoveredIndex >= sheetSelectionAnchor_ ? 1 : -1;
+            for (int i = sheetSelectionAnchor_;; i += direction) {
+                addInOrder(i);
+                if (i == hoveredIndex)
+                    break;
+            }
+        } else if (ImGui::GetIO().KeyCtrl) {
+            auto found = std::find(sheetSelection_.begin(), sheetSelection_.end(), hoveredIndex);
+            if (found == sheetSelection_.end())
+                sheetSelection_.push_back(hoveredIndex);
+            else
+                sheetSelection_.erase(found);
+            sheetSelectionAnchor_ = hoveredIndex;
+        } else {
+            sheetSelection_.assign(1, hoveredIndex);
+            sheetSelectionAnchor_ = hoveredIndex;
+        }
+    } else if (hoveredIndex >= 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left) &&
+               ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        addInOrder(hoveredIndex);
+    }
+    auto *draw = ImGui::GetWindowDrawList();
+    for (int row = 0; row < rows; ++row) {
+        for (int column = 0; column < actualColumns; ++column) {
+            const int index = row * actualColumns + column;
+            const ImVec2 min{imageMin.x + column * asset.frameWidth * scale,
+                             imageMin.y + row * asset.frameHeight * scale};
+            const ImVec2 max{min.x + asset.frameWidth * scale, min.y + asset.frameHeight * scale};
+            const auto selected = std::find(sheetSelection_.begin(), sheetSelection_.end(), index);
+            const bool isSelected = selected != sheetSelection_.end();
+            draw->AddRect(min, max,
+                          isSelected ? IM_COL32(255, 205, 40, 255) : IM_COL32(255, 255, 255, 75), 0,
+                          0, isSelected ? 3.0f : 1.0f);
+            if (isSelected) {
+                const auto order = static_cast<int>(selected - sheetSelection_.begin()) + 1;
+                char label[24];
+                std::snprintf(label, sizeof(label), "%d:%d", order, index);
+                draw->AddRectFilled(min,
+                                    {min.x + ImGui::CalcTextSize(label).x + 6,
+                                     min.y + ImGui::GetTextLineHeight() + 2},
+                                    IM_COL32(20, 20, 20, 210));
+                draw->AddText({min.x + 3, min.y + 1}, IM_COL32(255, 225, 60, 255), label);
+            }
+        }
+    }
+    ImGui::EndChild();
+
+    if (ImGui::TreeNode("Automatic cell-size suggestions")) {
+        ImGui::TextDisabled("Suggestions that divide the texture exactly:");
+        const int common[] = {8, 16, 24, 32, 48, 64, 96, 128, 256, 512};
+        for (int size : common) {
+            if (size > textureWidth_ || size > textureHeight_ || textureWidth_ % size != 0 ||
+                textureHeight_ % size != 0)
+                continue;
+            ImGui::PushID(size);
+            if (ImGui::SmallButton((std::to_string(size) + " x " + std::to_string(size)).c_str())) {
+                auto before = asset;
+                asset.frameWidth = asset.frameHeight = size;
+                asset.sheetColumns = textureWidth_ / size;
+                sheetSelection_.clear();
+                document_.mutate(before);
+            }
+            ImGui::SameLine();
+            ImGui::PopID();
+        }
+        ImGui::NewLine();
+        ImGui::TreePop();
+    }
+}
+
+void AnimationEditorPanel::atlasPicker() {
+    auto &asset = document_.asset();
+    auto &selection = document_.selection();
+    ImGui::SetNextItemWidth(180);
+    ImGui::InputTextWithHint("##atlas-search", "Search atlas regions...", atlasSearch_.data(),
+                             atlasSearch_.size());
+    ImGui::SameLine();
+    if (ImGui::Button("+ Region")) {
+        auto before = asset;
+        std::string id = "region";
+        for (int suffix = 1; asset.findAtlasRegion(id); ++suffix)
+            id = "region_" + std::to_string(suffix);
+        const float width = std::min(64, textureWidth_);
+        const float height = std::min(64, textureHeight_);
+        asset.atlasRegions.push_back({id, id, {0, 0, width, height}});
+        document_.mutate(before);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(100);
+    ImGui::SliderFloat("Atlas zoom", &sheetPickerZoom_, .25f, 8.0f, "%.2fx",
+                       ImGuiSliderFlags_Logarithmic);
+
+    ImGui::BeginChild("atlas-sheet-scroll", {0, 340}, true, ImGuiWindowFlags_HorizontalScrollbar);
+    const float scale = std::max(.05f, sheetPickerZoom_);
+    const ImVec2 imageSize{textureWidth_ * scale, textureHeight_ * scale};
+    SetTextureFilter(texture_,
+                     asset.render.textureFilter == teya::animation::AnimationTextureFilter::Nearest
+                         ? TEXTURE_FILTER_POINT
+                         : TEXTURE_FILTER_BILINEAR);
+    rlImGuiImageRect(
+        &texture_, static_cast<int>(imageSize.x), static_cast<int>(imageSize.y),
+        Rectangle{0, 0, static_cast<float>(textureWidth_), static_cast<float>(textureHeight_)});
+    const ImVec2 origin = ImGui::GetItemRectMin();
+    auto *draw = ImGui::GetWindowDrawList();
+    for (std::size_t i = 0; i < asset.atlasRegions.size(); ++i) {
+        const auto &region = asset.atlasRegions[i];
+        const ImVec2 min{origin.x + region.bounds.x * scale, origin.y + region.bounds.y * scale};
+        const ImVec2 max{min.x + region.bounds.width * scale, min.y + region.bounds.height * scale};
+        const bool active =
+            !asset.clips.empty() && !asset.clips[selection.clip].frames.empty() &&
+            asset.clips[selection.clip].frames[selection.frame].source.atlasRegion == region.id;
+        draw->AddRect(min, max, active ? IM_COL32(255, 205, 40, 255) : IM_COL32(60, 210, 255, 210),
+                      0, 0, active ? 3 : 1.5f);
+        draw->AddText({min.x + 2, min.y + 2}, IM_COL32(255, 255, 255, 255), region.id.c_str());
+        if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            ImGui::IsMouseHoveringRect(min, max) && !asset.clips.empty() &&
+            !asset.clips[selection.clip].frames.empty()) {
+            auto before = asset;
+            asset.clips[selection.clip].frames[selection.frame].source.atlasRegion = region.id;
+            document_.mutate(before);
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::SeparatorText("Atlas regions");
+    for (std::size_t i = 0; i < asset.atlasRegions.size(); ++i) {
+        auto &region = asset.atlasRegions[i];
+        std::string searchable = region.id + " " + region.name;
+        std::string query = atlasSearch_.data();
+        auto lower = [](unsigned char c) { return static_cast<char>(std::tolower(c)); };
+        std::transform(searchable.begin(), searchable.end(), searchable.begin(), lower);
+        std::transform(query.begin(), query.end(), query.begin(), lower);
+        if (!query.empty() && searchable.find(query) == std::string::npos)
+            continue;
+        ImGui::PushID(static_cast<int>(i));
+        if (ImGui::TreeNode(region.name.empty() ? region.id.c_str() : region.name.c_str())) {
+            auto before = asset;
+            auto id = buffer<96>(region.id);
+            auto name = buffer<96>(region.name);
+            bool changed = ImGui::InputText("Stable ID", id.data(), id.size());
+            changed |= ImGui::InputText("Display name", name.data(), name.size());
+            changed |= ImGui::InputFloat4("Rectangle", &region.bounds.x, "%.2f");
+            if (changed) {
+                region.id = id.data();
+                region.name = name.data();
+                document_.mutate(before);
+            }
+            if (ImGui::Button("Assign to current frame") && !asset.clips.empty() &&
+                !asset.clips[selection.clip].frames.empty()) {
+                before = asset;
+                asset.clips[selection.clip].frames[selection.frame].source.atlasRegion = region.id;
+                document_.mutate(before);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Delete region")) {
+                before = asset;
+                asset.atlasRegions.erase(asset.atlasRegions.begin() + i);
+                document_.mutate(before);
+                ImGui::TreePop();
+                ImGui::PopID();
+                break;
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    ImGui::TextDisabled(
+        "Regions use exact runtime atlas rectangles and serialize in the animation asset.");
+}
+bool AnimationEditorPanel::openAsset(EditorHost &host, std::uint64_t id) {
+    if (document_.dirty()) {
+        message_ = "Save or Reload the dirty animation before opening another asset";
+        open = true;
+        return false;
+    }
+    load(host, id);
+    open = true;
+    return loaded_ && document_.assetId() == id;
 }
 void AnimationEditorPanel::validate(EditorHost &h) {
     TEYA_PROFILE_ZONE_NAMED("AnimationEditor::validate");
@@ -94,7 +493,20 @@ void AnimationEditorPanel::save(EditorHost &h) {
     }
     auto r = h.saveAndApplyAnimationAsset(document_.assetId(), document_.asset());
     if (r) {
-        document_.markSaved();
+        const auto assetId = document_.assetId();
+        const auto oldSelection = document_.selection();
+        const auto clipName = document_.asset().clips.empty()
+                                  ? std::string{}
+                                  : document_.asset().clips[oldSelection.clip].name;
+        load(h, assetId);
+        auto found = std::find_if(document_.asset().clips.begin(), document_.asset().clips.end(),
+                                  [&](const auto &clip) { return clip.name == clipName; });
+        if (found != document_.asset().clips.end()) {
+            document_.selection().clip =
+                static_cast<std::size_t>(found - document_.asset().clips.begin());
+            document_.selection().frame = oldSelection.frame;
+            document_.repairSelection();
+        }
         message_ = "Saved and applied";
     } else
         message_ = r.error;
@@ -142,7 +554,9 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
     const auto it = std::find_if(assets_.begin(), assets_.end(),
                                  [&](auto &a) { return a.id == document_.assetId(); });
     const char *current = it == assets_.end() ? "Select asset" : it->displayName.c_str();
-    if (ImGui::BeginCombo("Asset", current)) {
+    ImGui::TextDisabled("Animation asset");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::BeginCombo("##animation-asset", current)) {
         for (auto &a : assets_) {
             bool selected = a.id == document_.assetId();
             if (ImGui::Selectable(a.displayName.c_str(), selected)) {
@@ -161,7 +575,6 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
         }
         ImGui::EndCombo();
     }
-    ImGui::SameLine();
     if (loaded_)
         ImGui::TextColored(document_.dirty() ? ImVec4(1, .7f, .2f, 1) : ImVec4(.4f, 1, .4f, 1),
                            document_.dirty() ? "Dirty *" : "Saved");
@@ -174,11 +587,11 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
     ImGui::SameLine();
     if (ImGui::Button("Validate"))
         validate(h);
-    ImGui::SameLine();
     if (ImGui::Button("Apply Without Saving"))
         applyTemporary(h);
+    ImGui::SameLine();
+    frameSourcePicker();
     if (document_.temporaryApplied()) {
-        ImGui::SameLine();
         ImGui::TextColored({1, .6f, .1f, 1}, "Temporary runtime asset");
     }
     if (ImGui::BeginPopupModal("Discard animation changes?", nullptr,
@@ -211,7 +624,6 @@ void AnimationEditorPanel::clips() {
     ImGui::SameLine();
     if (ImGui::Button("Duplicate"))
         document_.duplicateClip();
-    ImGui::SameLine();
     if (ImGui::Button("Delete"))
         document_.deleteClip();
     ImGui::Separator();
@@ -239,6 +651,7 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     s.frame = std::min(s.frame, a.clips[s.clip].frames.size() - 1);
     auto &clip = a.clips[s.clip];
     auto &frame = clip.frames[s.frame];
+    const bool mirrored = clip.mirrored;
     auto source = teya::animation::animationSourceRectangle(a, frame);
     if (!source || !IsTextureValid(texture_)) {
         ImGui::TextColored({1, .4f, .4f, 1},
@@ -261,13 +674,9 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         previewPlayer_.pause();
         previewPlayer_.consumeEvents();
     }
-    ImGui::SameLine();
-    ImGui::Checkbox("Left-facing", &facingLeft_);
-    ImGui::SameLine();
     ImGui::Checkbox("Fit", &fit_);
     ImGui::SameLine();
     ImGui::Checkbox("Grid", &showGrid_);
-    ImGui::SameLine();
     ImGui::Checkbox("Prev onion", &onionPrevious_);
     ImGui::SameLine();
     ImGui::Checkbox("Next onion", &onionNext_);
@@ -297,12 +706,16 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     ImVec2 cursor = ImGui::GetCursorScreenPos();
     ImVec2 pos{cursor.x + std::max(0.f, (avail.x - size.x) * .5f) + pan_.x, cursor.y + 20 + pan_.y};
     ImGui::SetCursorScreenPos(pos);
-    Rectangle shown = *source;
-    if (facingLeft_) {
-        shown.x += shown.width;
-        shown.width = -shown.width;
-    }
-    rlImGuiImageRect(&texture_, (int)size.x, (int)size.y, shown);
+    // rlImGuiImageRect's negative-width convention differs from raylib's
+    // DrawTexturePro convention. Use explicit UVs so left-facing preview is a
+    // true horizontal mirror of exactly the selected source region.
+    const float uLeft = source->x / static_cast<float>(texture_.width);
+    const float uRight = (source->x + source->width) / static_cast<float>(texture_.width);
+    const float vTop = source->y / static_cast<float>(texture_.height);
+    const float vBottom = (source->y + source->height) / static_cast<float>(texture_.height);
+    const ImVec2 uv0{mirrored ? uRight : uLeft, vTop};
+    const ImVec2 uv1{mirrored ? uLeft : uRight, vBottom};
+    ImGui::Image((ImTextureID)texture_.id, size, uv0, uv1);
     ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
     auto *dl = ImGui::GetWindowDrawList();
     dl->AddRect(min, max, IM_COL32(255, 255, 255, 180));
@@ -315,8 +728,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
                         IM_COL32(255, 255, 255, 25));
     }
     for (size_t i = 0; i < frame.sockets.size(); ++i) {
-        auto socket = facingLeft_ ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
-                                  : frame.sockets[i];
+        auto socket = mirrored ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
+                               : frame.sockets[i];
         ImVec2 p{min.x + socket.position.x * z, min.y + socket.position.y * z};
         ImU32 color = s.kind == AnimationSelection::Kind::Socket && s.item == i
                           ? IM_COL32(255, 255, 0, 255)
@@ -327,9 +740,9 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         dl->AddText({p.x + 6, p.y - 8}, color, socket.name.c_str());
     }
     for (size_t i = 0; i < frame.hitboxes.size(); ++i) {
-        auto b = facingLeft_ ? teya::animation::mirrorRectangle(frame.hitboxes[i].localBounds,
-                                                                source->width)
-                             : frame.hitboxes[i].localBounds;
+        auto b = mirrored ? teya::animation::mirrorRectangle(frame.hitboxes[i].localBounds,
+                                                             source->width)
+                          : frame.hitboxes[i].localBounds;
         ImU32 c = s.kind == AnimationSelection::Kind::Hitbox && s.item == i
                       ? IM_COL32(255, 255, 0, 255)
                       : IM_COL32(255, 60, 60, 220);
@@ -337,8 +750,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
                     {min.x + (b.x + b.width) * z, min.y + (b.y + b.height) * z}, c, 0, 0, 2);
     }
     for (size_t i = 0; i < frame.markers.size(); ++i) {
-        auto m = facingLeft_ ? teya::animation::mirrorMarker(frame.markers[i], source->width)
-                             : frame.markers[i];
+        auto m = mirrored ? teya::animation::mirrorMarker(frame.markers[i], source->width)
+                          : frame.markers[i];
         ImVec2 p{min.x + m.position.x * z, min.y + m.position.y * z};
         ImU32 color = s.kind == AnimationSelection::Kind::Marker && s.item == i
                           ? IM_COL32(255, 255, 0, 255)
@@ -351,14 +764,13 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     const Vector2 mouse{io.MousePos.x, io.MousePos.y};
     const Vector2 previewOrigin{min.x, min.y};
     auto mouseLocal = [&] {
-        return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, facingLeft_,
-                                             source->width);
+        return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, mirrored, source->width);
     };
     if (previewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
         for (std::size_t i = 0; i < frame.sockets.size(); ++i) {
-            auto displayed = facingLeft_
+            auto displayed = mirrored
                                  ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
                                  : frame.sockets[i];
             const float dx = min.x + displayed.position.x * z - mouse.x;
@@ -415,8 +827,9 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
         for (std::size_t i = 0; i < frame.markers.size(); ++i) {
-            auto displayed = facingLeft_ ? teya::animation::mirrorMarker(frame.markers[i], source->width)
-                                         : frame.markers[i];
+            auto displayed = mirrored
+                                 ? teya::animation::mirrorMarker(frame.markers[i], source->width)
+                                 : frame.markers[i];
             const float dx = min.x + displayed.position.x * z - mouse.x;
             const float dy = min.y + displayed.position.y * z - mouse.y;
             const float distanceSquared = dx * dx + dy * dy;
@@ -553,8 +966,25 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
     auto &s = document_.selection();
     if (ImGui::CollapsingHeader("Asset", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Text("Schema %d", a.schemaVersion);
-        ImGui::TextWrapped("Texture: %s", a.texturePath.c_str());
+        auto texturePath = buffer<256>(a.texturePath);
         auto before = a;
+        if (ImGui::InputText("Texture path", texturePath.data(), texturePath.size())) {
+            a.texturePath = texturePath.data();
+            document_.mutate(before);
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Save to load the changed texture into the preview and running game");
+        before = a;
+        int sourceMode =
+            a.sourceMode == teya::animation::AnimationFrameSourceMode::SpriteSheetGrid ? 0 : 1;
+        if (ImGui::Combo("Frame source", &sourceMode, "Sprite Sheet Grid\0Texture Atlas\0")) {
+            a.sourceMode = sourceMode == 0
+                               ? teya::animation::AnimationFrameSourceMode::SpriteSheetGrid
+                               : teya::animation::AnimationFrameSourceMode::TextureAtlas;
+            document_.mutate(before);
+            sheetSelection_.clear();
+        }
+        before = a;
         int mode = a.render.mode == teya::animation::AnimationRenderMode::PixelArt ? 0 : 1;
         if (ImGui::Combo("Render mode", &mode, "Pixel Art\0Smooth\0")) {
             a.render.mode = mode == 0 ? teya::animation::AnimationRenderMode::PixelArt
@@ -609,17 +1039,29 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
     }
     if (a.clips.empty())
         return;
+    actionBindings();
     auto &clip = a.clips[s.clip];
     if (ImGui::CollapsingHeader("Clip", ImGuiTreeNodeFlags_DefaultOpen)) {
         auto b = buffer<128>(clip.name);
         auto before = a;
         if (ImGui::InputText("Name", b.data(), b.size())) {
+            const auto oldName = clip.name;
             clip.name = b.data();
+            for (auto &binding : a.controller.bindings)
+                if (binding.clipName == oldName)
+                    binding.clipName = clip.name;
             document_.mutate(before);
         }
         before = a;
         if (ImGui::Checkbox("Looping", &clip.looping))
             document_.mutate(before);
+        before = a;
+        if (ImGui::Checkbox("Mirror clip", &clip.mirrored))
+            document_.mutate(before);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Always play this clip horizontally mirrored. Duplicate a clip "
+                              "and enable this on the copy to reuse the same source frames for "
+                              "the opposite direction.");
         ImGui::Text("%zu frames, %.3f seconds", clip.frames.size(), clipDuration(clip));
     }
     if (clip.frames.empty())
@@ -687,6 +1129,102 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
             ImGui::PopStyleColor();
         }
     }
+}
+void AnimationEditorPanel::actionBindings() {
+    auto &asset = document_.asset();
+    auto &selection = document_.selection();
+    if (!ImGui::CollapsingHeader("Action Bindings", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+
+    auto defaultAction = buffer<96>(asset.controller.defaultAction);
+    auto before = asset;
+    if (ImGui::InputText("Default action", defaultAction.data(), defaultAction.size())) {
+        asset.controller.defaultAction = defaultAction.data();
+        document_.mutate(before);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The looping action used when the controller first starts");
+
+    if (ImGui::Button("+ Bind selected clip")) {
+        before = asset;
+        const auto &clip = asset.clips[selection.clip];
+        std::string action = clip.name;
+        auto direction = teya::animation::AnimationDirection::Any;
+        const struct {
+            const char *suffix;
+            teya::animation::AnimationDirection direction;
+        } suffixes[] = {{"_down", teya::animation::AnimationDirection::Down},
+                        {"_up", teya::animation::AnimationDirection::Up},
+                        {"_right", teya::animation::AnimationDirection::Right},
+                        {"_left", teya::animation::AnimationDirection::Left}};
+        for (const auto &suffix : suffixes) {
+            const std::string_view ending = suffix.suffix;
+            if (action.size() > ending.size() &&
+                action.compare(action.size() - ending.size(), ending.size(), ending) == 0) {
+                action.resize(action.size() - ending.size());
+                direction = suffix.direction;
+                break;
+            }
+        }
+        asset.controller.bindings.push_back({std::move(action), direction, clip.name,
+                                             clip.looping
+                                                 ? teya::animation::AnimationActionMode::Looping
+                                                 : teya::animation::AnimationActionMode::OneShot,
+                                             clip.looping ? 0 : 10});
+        if (asset.controller.bindings.size() == 1)
+            asset.controller.defaultAction = asset.controller.bindings.front().action;
+        document_.mutate(before);
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Directional suffixes are detected automatically");
+
+    for (std::size_t i = 0; i < asset.controller.bindings.size(); ++i) {
+        auto &binding = asset.controller.bindings[i];
+        ImGui::PushID(static_cast<int>(i));
+        const std::string label =
+            binding.action + " / " + directionName(binding.direction) + " -> " + binding.clipName;
+        if (ImGui::TreeNode(label.c_str())) {
+            before = asset;
+            auto action = buffer<96>(binding.action);
+            bool changed = ImGui::InputText("Action", action.data(), action.size());
+            int direction = static_cast<int>(binding.direction);
+            if (ImGui::Combo("Direction", &direction, "Any\0Down\0Up\0Right\0Left\0")) {
+                binding.direction = static_cast<teya::animation::AnimationDirection>(direction);
+                changed = true;
+            }
+            if (ImGui::BeginCombo("Clip", binding.clipName.c_str())) {
+                for (const auto &clip : asset.clips)
+                    if (ImGui::Selectable(clip.name.c_str(), binding.clipName == clip.name)) {
+                        binding.clipName = clip.name;
+                        changed = true;
+                    }
+                ImGui::EndCombo();
+            }
+            int mode = binding.mode == teya::animation::AnimationActionMode::Looping ? 0 : 1;
+            if (ImGui::Combo("Mode", &mode, "Looping\0One Shot\0")) {
+                binding.mode = mode == 0 ? teya::animation::AnimationActionMode::Looping
+                                         : teya::animation::AnimationActionMode::OneShot;
+                changed = true;
+            }
+            changed |= ImGui::InputInt("Priority", &binding.priority);
+            if (changed) {
+                binding.action = action.data();
+                document_.mutate(before);
+            }
+            if (ImGui::Button("Remove binding")) {
+                before = asset;
+                asset.controller.bindings.erase(asset.controller.bindings.begin() + i);
+                document_.mutate(before);
+                ImGui::TreePop();
+                ImGui::PopID();
+                break;
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    if (asset.controller.bindings.empty())
+        ImGui::TextDisabled("No bindings saved. The game may use its legacy fallback mapping.");
 }
 void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::AnimationFrame &f) {
     auto &a = document_.asset();
@@ -962,8 +1500,6 @@ void AnimationEditorPanel::shortcuts(EditorHost &h) {
         if (!c.frames.empty())
             document_.selection().frame = c.frames.size() - 1;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_F, false))
-        facingLeft_ = !facingLeft_;
     if (ImGui::IsKeyPressed(ImGuiKey_G, false))
         showGrid_ = !showGrid_;
     if (ctrl && ImGui::IsKeyPressed(ImGuiKey_D, false)) {
