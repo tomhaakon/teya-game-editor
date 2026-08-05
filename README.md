@@ -64,8 +64,9 @@ the next load or editor shutdown.
 
 `Attachment Objects...` manages reusable game-provided objects such as swords,
 axes, fishing rods, and lanterns. Each object has a texture, hand pivot, default
-socket, transform offsets, visibility, and owner draw layer. Click the texture in
+socket, transform offsets, and visibility. Click the texture in
 the pivot preview at the point that should sit on the socket. The animation
 preview renders the object through the authored socket transform and clip
-mirroring. Persistence and live application remain host-owned, so the editor
+mirroring. The socket's per-frame layer decides whether it is behind or in front
+of the owner. Persistence and live application remain host-owned, so the editor
 does not hard-code game item paths or formats.

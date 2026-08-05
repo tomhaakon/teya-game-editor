@@ -690,10 +690,6 @@ void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
                              "%.2f deg");
             ImGui::DragFloat2("Scale", &object.scale.x, .01f, .01f, 100, "%.3f");
             ImGui::Checkbox("Visible", &object.visible);
-            int layer = object.layer == teya::animation::AttachmentLayer::BehindOwner ? 0 : 1;
-            if (ImGui::Combo("Layer", &layer, "Behind Owner\0In Front Of Owner\0"))
-                object.layer = layer == 0 ? teya::animation::AttachmentLayer::BehindOwner
-                                          : teya::animation::AttachmentLayer::InFrontOfOwner;
             ImGui::SeparatorText("Pivot preview");
             if (IsTextureValid(object.texture)) {
                 const float maxSide = 220.0f;
@@ -873,13 +869,15 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     std::vector<AttachmentHitRegion> attachmentHitRegions;
     auto drawAttachmentLayer = [&](teya::animation::AttachmentLayer layer) {
         for (const auto &object : attachmentObjects_) {
-            if (!object.visible || object.layer != layer || !IsTextureValid(object.texture))
+            if (!object.visible || !IsTextureValid(object.texture))
                 continue;
             auto socketIt = std::find_if(frame.sockets.begin(), frame.sockets.end(),
                                          [&](const auto &socket) {
                                              return socket.name == object.socketName;
                                          });
             if (socketIt == frame.sockets.end() || !socketIt->visible)
+                continue;
+            if (socketIt->layer != layer)
                 continue;
             auto socket = mirrored ? teya::animation::mirrorSocket(*socketIt, source->width)
                                    : *socketIt;
