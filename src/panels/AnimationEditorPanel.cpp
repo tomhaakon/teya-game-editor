@@ -146,7 +146,12 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
         for (auto &a : assets_) {
             bool selected = a.id == document_.assetId();
             if (ImGui::Selectable(a.displayName.c_str(), selected)) {
-                if (document_.dirty())
+                // Selecting the current item only closes the combo. Reloading
+                // here replaces the document while this popup is still using
+                // its state and is both unnecessary and unsafe.
+                if (selected) {
+                    ImGui::CloseCurrentPopup();
+                } else if (document_.dirty())
                     message_ = "Save or Reload before switching dirty assets";
                 else
                     load(h, a.id);
@@ -335,8 +340,184 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         auto m = facingLeft_ ? teya::animation::mirrorMarker(frame.markers[i], source->width)
                              : frame.markers[i];
         ImVec2 p{min.x + m.position.x * z, min.y + m.position.y * z};
-        dl->AddLine({p.x - 6, p.y}, {p.x + 6, p.y}, IM_COL32(100, 255, 100, 255), 2);
-        dl->AddLine({p.x, p.y - 6}, {p.x, p.y + 6}, IM_COL32(100, 255, 100, 255), 2);
+        ImU32 color = s.kind == AnimationSelection::Kind::Marker && s.item == i
+                          ? IM_COL32(255, 255, 0, 255)
+                          : IM_COL32(100, 255, 100, 255);
+        dl->AddLine({p.x - 7, p.y}, {p.x + 7, p.y}, color, 2);
+        dl->AddLine({p.x, p.y - 7}, {p.x, p.y + 7}, color, 2);
+    }
+    const bool previewHovered = ImGui::IsItemHovered();
+    auto &io = ImGui::GetIO();
+    const Vector2 mouse{io.MousePos.x, io.MousePos.y};
+    const Vector2 previewOrigin{min.x, min.y};
+    auto mouseLocal = [&] {
+        return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, facingLeft_,
+                                             source->width);
+    };
+    if (previewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        float closestDistanceSquared = 12.0f * 12.0f;
+        std::optional<std::size_t> closest;
+        for (std::size_t i = 0; i < frame.sockets.size(); ++i) {
+            auto displayed = facingLeft_
+                                 ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
+                                 : frame.sockets[i];
+            const float dx = min.x + displayed.position.x * z - mouse.x;
+            const float dy = min.y + displayed.position.y * z - mouse.y;
+            const float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared < closestDistanceSquared) {
+                closestDistanceSquared = distanceSquared;
+                closest = i;
+            }
+        }
+        if (closest) {
+            playing_ = false;
+            previewPlayer_.pause();
+            s.kind = AnimationSelection::Kind::Socket;
+            s.item = *closest;
+            socketDragActive_ = true;
+            socketDragChanged_ = false;
+            socketDragClip_ = s.clip;
+            socketDragFrame_ = s.frame;
+            socketDragIndex_ = *closest;
+            socketDragBefore_ = a;
+            const Vector2 local = mouseLocal();
+            socketDragOffset_ = {frame.sockets[*closest].position.x - local.x,
+                                 frame.sockets[*closest].position.y - local.y};
+        }
+    }
+    if (socketDragActive_) {
+        const bool targetStillValid = socketDragClip_ == s.clip && socketDragFrame_ == s.frame &&
+                                      socketDragIndex_ < frame.sockets.size();
+        if (!targetStillValid) {
+            socketDragActive_ = false;
+            socketDragChanged_ = false;
+        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            Vector2 position = mouseLocal();
+            position.x += socketDragOffset_.x;
+            position.y += socketDragOffset_.y;
+            const bool snap = io.KeyShift || (a.authoring.snapPositions && !io.KeyAlt);
+            const float increment = a.authoring.positionSnap > 0 ? a.authoring.positionSnap : 1.0f;
+            position.x = snapAnimationValue(position.x, snap, increment);
+            position.y = snapAnimationValue(position.y, snap, increment);
+            auto &socket = frame.sockets[socketDragIndex_];
+            if (socket.position.x != position.x || socket.position.y != position.y) {
+                socket.position = position;
+                socketDragChanged_ = true;
+            }
+        } else {
+            socketDragActive_ = false;
+            if (socketDragChanged_)
+                document_.mutate(socketDragBefore_);
+            socketDragChanged_ = false;
+        }
+    }
+    if (previewHovered && !socketDragActive_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        float closestDistanceSquared = 12.0f * 12.0f;
+        std::optional<std::size_t> closest;
+        for (std::size_t i = 0; i < frame.markers.size(); ++i) {
+            auto displayed = facingLeft_ ? teya::animation::mirrorMarker(frame.markers[i], source->width)
+                                         : frame.markers[i];
+            const float dx = min.x + displayed.position.x * z - mouse.x;
+            const float dy = min.y + displayed.position.y * z - mouse.y;
+            const float distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared < closestDistanceSquared) {
+                closestDistanceSquared = distanceSquared;
+                closest = i;
+            }
+        }
+        if (closest) {
+            playing_ = false;
+            previewPlayer_.pause();
+            s.kind = AnimationSelection::Kind::Marker;
+            s.item = *closest;
+            markerDragActive_ = true;
+            markerDragChanged_ = false;
+            markerDragClip_ = s.clip;
+            markerDragFrame_ = s.frame;
+            markerDragIndex_ = *closest;
+            markerDragBefore_ = a;
+            const Vector2 local = mouseLocal();
+            markerDragOffset_ = {frame.markers[*closest].position.x - local.x,
+                                 frame.markers[*closest].position.y - local.y};
+        }
+    }
+    if (markerDragActive_) {
+        const bool targetStillValid = markerDragClip_ == s.clip && markerDragFrame_ == s.frame &&
+                                      markerDragIndex_ < frame.markers.size();
+        if (!targetStillValid) {
+            markerDragActive_ = false;
+            markerDragChanged_ = false;
+        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            Vector2 position = mouseLocal();
+            position.x += markerDragOffset_.x;
+            position.y += markerDragOffset_.y;
+            const bool snap = io.KeyShift || (a.authoring.snapPositions && !io.KeyAlt);
+            const float increment = a.authoring.positionSnap > 0 ? a.authoring.positionSnap : 1.0f;
+            position.x = snapAnimationValue(position.x, snap, increment);
+            position.y = snapAnimationValue(position.y, snap, increment);
+            auto &marker = frame.markers[markerDragIndex_];
+            if (marker.position.x != position.x || marker.position.y != position.y) {
+                marker.position = position;
+                markerDragChanged_ = true;
+            }
+        } else {
+            markerDragActive_ = false;
+            if (markerDragChanged_)
+                document_.mutate(markerDragBefore_);
+            markerDragChanged_ = false;
+        }
+    }
+    if (previewHovered && !socketDragActive_ && !markerDragActive_ &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        const Vector2 local = mouseLocal();
+        for (std::size_t i = frame.hitboxes.size(); i-- > 0;) {
+            const auto &bounds = frame.hitboxes[i].localBounds;
+            const float left = std::min(bounds.x, bounds.x + bounds.width);
+            const float right = std::max(bounds.x, bounds.x + bounds.width);
+            const float top = std::min(bounds.y, bounds.y + bounds.height);
+            const float bottom = std::max(bounds.y, bounds.y + bounds.height);
+            if (local.x >= left && local.x <= right && local.y >= top && local.y <= bottom) {
+                playing_ = false;
+                previewPlayer_.pause();
+                s.kind = AnimationSelection::Kind::Hitbox;
+                s.item = i;
+                hitboxDragActive_ = true;
+                hitboxDragChanged_ = false;
+                hitboxDragClip_ = s.clip;
+                hitboxDragFrame_ = s.frame;
+                hitboxDragIndex_ = i;
+                hitboxDragBefore_ = a;
+                hitboxDragOffset_ = {bounds.x - local.x, bounds.y - local.y};
+                break;
+            }
+        }
+    }
+    if (hitboxDragActive_) {
+        const bool targetStillValid = hitboxDragClip_ == s.clip && hitboxDragFrame_ == s.frame &&
+                                      hitboxDragIndex_ < frame.hitboxes.size();
+        if (!targetStillValid) {
+            hitboxDragActive_ = false;
+            hitboxDragChanged_ = false;
+        } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            Vector2 position = mouseLocal();
+            position.x += hitboxDragOffset_.x;
+            position.y += hitboxDragOffset_.y;
+            const bool snap = io.KeyShift || (a.authoring.snapPositions && !io.KeyAlt);
+            const float increment = a.authoring.positionSnap > 0 ? a.authoring.positionSnap : 1.0f;
+            position.x = snapAnimationValue(position.x, snap, increment);
+            position.y = snapAnimationValue(position.y, snap, increment);
+            auto &bounds = frame.hitboxes[hitboxDragIndex_].localBounds;
+            if (bounds.x != position.x || bounds.y != position.y) {
+                bounds.x = position.x;
+                bounds.y = position.y;
+                hitboxDragChanged_ = true;
+            }
+        } else {
+            hitboxDragActive_ = false;
+            if (hitboxDragChanged_)
+                document_.mutate(hitboxDragBefore_);
+            hitboxDragChanged_ = false;
+        }
     }
     if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
         auto d = ImGui::GetIO().MouseDelta;
