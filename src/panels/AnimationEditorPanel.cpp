@@ -761,7 +761,20 @@ void AnimationEditorPanel::clips() {
     if (ImGui::Button("Delete"))
         document_.deleteClip();
     ImGui::Separator();
-    for (size_t i = 0; i < a.clips.size(); ++i)
+    std::vector<std::size_t> sortedClips(a.clips.size());
+    for (std::size_t i = 0; i < sortedClips.size(); ++i)
+        sortedClips[i] = i;
+    std::stable_sort(sortedClips.begin(), sortedClips.end(), [&](std::size_t left,
+                                                                 std::size_t right) {
+        const auto &aName = a.clips[left].name;
+        const auto &bName = a.clips[right].name;
+        return std::lexicographical_compare(
+            aName.begin(), aName.end(), bName.begin(), bName.end(),
+            [](unsigned char aChar, unsigned char bChar) {
+                return std::tolower(aChar) < std::tolower(bChar);
+            });
+    });
+    for (const std::size_t i : sortedClips)
         if (ImGui::Selectable(a.clips[i].name.c_str(), s.clip == i)) {
             s.clip = i;
             s.frame = 0;
@@ -853,6 +866,11 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     const ImVec2 uv1{mirrored ? uLeft : uRight, vBottom};
     ImVec2 min = pos, max{pos.x + size.x, pos.y + size.y};
     auto *dl = ImGui::GetWindowDrawList();
+    struct AttachmentHitRegion {
+        std::size_t socketIndex = 0;
+        std::array<ImVec2, 4> corners{};
+    };
+    std::vector<AttachmentHitRegion> attachmentHitRegions;
     auto drawAttachmentLayer = [&](teya::animation::AttachmentLayer layer) {
         for (const auto &object : attachmentObjects_) {
             if (!object.visible || object.layer != layer || !IsTextureValid(object.texture))
@@ -889,6 +907,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             const ImVec2 p2 = corner(static_cast<float>(object.texture.width),
                                      static_cast<float>(object.texture.height));
             const ImVec2 p3 = corner(0, static_cast<float>(object.texture.height));
+            attachmentHitRegions.push_back(
+                {static_cast<std::size_t>(socketIt - frame.sockets.begin()), {p0, p1, p2, p3}});
             const ImVec2 textureTopLeft = mirrored ? ImVec2{1, 0} : ImVec2{0, 0};
             const ImVec2 textureTopRight = mirrored ? ImVec2{0, 0} : ImVec2{1, 0};
             const ImVec2 textureBottomRight = mirrored ? ImVec2{0, 1} : ImVec2{1, 1};
@@ -951,21 +971,47 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     auto mouseLocal = [&] {
         return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, mirrored, source->width);
     };
-    if (showSockets_ && previewHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    auto pointInTriangle = [](ImVec2 point, ImVec2 aPoint, ImVec2 bPoint, ImVec2 cPoint) {
+        auto side = [](ImVec2 p, ImVec2 a, ImVec2 b) {
+            return (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
+        };
+        const bool negative = side(point, aPoint, bPoint) < 0 ||
+                              side(point, bPoint, cPoint) < 0 ||
+                              side(point, cPoint, aPoint) < 0;
+        const bool positive = side(point, aPoint, bPoint) > 0 ||
+                              side(point, bPoint, cPoint) > 0 ||
+                              side(point, cPoint, aPoint) > 0;
+        return !(negative && positive);
+    };
+    std::optional<std::size_t> attachmentSocket;
+    const ImVec2 mousePosition{mouse.x, mouse.y};
+    for (auto region = attachmentHitRegions.rbegin(); region != attachmentHitRegions.rend();
+         ++region) {
+        const auto &p = region->corners;
+        if (pointInTriangle(mousePosition, p[0], p[1], p[2]) ||
+            pointInTriangle(mousePosition, p[0], p[2], p[3])) {
+            attachmentSocket = region->socketIndex;
+            break;
+        }
+    }
+    if ((previewHovered || attachmentSocket) && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
-        for (std::size_t i = 0; i < frame.sockets.size(); ++i) {
-            auto displayed = mirrored
-                                 ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
-                                 : frame.sockets[i];
-            const float dx = min.x + displayed.position.x * z - mouse.x;
-            const float dy = min.y + displayed.position.y * z - mouse.y;
-            const float distanceSquared = dx * dx + dy * dy;
-            if (distanceSquared < closestDistanceSquared) {
-                closestDistanceSquared = distanceSquared;
-                closest = i;
+        if (showSockets_ && previewHovered)
+            for (std::size_t i = 0; i < frame.sockets.size(); ++i) {
+                auto displayed = mirrored
+                                     ? teya::animation::mirrorSocket(frame.sockets[i], source->width)
+                                     : frame.sockets[i];
+                const float dx = min.x + displayed.position.x * z - mouse.x;
+                const float dy = min.y + displayed.position.y * z - mouse.y;
+                const float distanceSquared = dx * dx + dy * dy;
+                if (distanceSquared < closestDistanceSquared) {
+                    closestDistanceSquared = distanceSquared;
+                    closest = i;
+                }
             }
-        }
+        if (!closest)
+            closest = attachmentSocket;
         if (closest) {
             playing_ = false;
             previewPlayer_.pause();
@@ -1149,7 +1195,7 @@ void AnimationEditorPanel::preview(EditorHost &host) {
 void AnimationEditorPanel::inspector(EditorHost &host) {
     auto &a = document_.asset();
     auto &s = document_.selection();
-    if (ImGui::CollapsingHeader("Asset", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Asset")) {
         ImGui::Text("Schema %d", a.schemaVersion);
         auto texturePath = buffer<256>(a.texturePath);
         auto before = a;
@@ -1226,7 +1272,7 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
         return;
     actionBindings();
     auto &clip = a.clips[s.clip];
-    if (ImGui::CollapsingHeader("Clip", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Clip")) {
         auto b = buffer<128>(clip.name);
         auto before = a;
         if (ImGui::InputText("Name", b.data(), b.size())) {
@@ -1252,7 +1298,7 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
     if (clip.frames.empty())
         return;
     auto &frame = clip.frames[s.frame];
-    if (ImGui::CollapsingHeader("Frame", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Frame")) {
         auto before = a;
         float duration = frame.durationSeconds;
         if (ImGui::InputFloat("Duration", &duration, 0, 0, "%.4f") && std::isfinite(duration) &&
@@ -1294,7 +1340,7 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
             document_.paste();
     }
     frameCollections(host, frame);
-    if (ImGui::CollapsingHeader("Validation", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Validation")) {
         int errors = 0, warnings = 0;
         for (auto &i : validation_.issues)
             (i.severity == teya::animation::AnimationValidationSeverity::Error ? errors
@@ -1318,7 +1364,7 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
 void AnimationEditorPanel::actionBindings() {
     auto &asset = document_.asset();
     auto &selection = document_.selection();
-    if (!ImGui::CollapsingHeader("Action Bindings", ImGuiTreeNodeFlags_DefaultOpen))
+    if (!ImGui::CollapsingHeader("Action Bindings"))
         return;
 
     auto defaultAction = buffer<96>(asset.controller.defaultAction);
