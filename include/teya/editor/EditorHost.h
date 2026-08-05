@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 #include <raylib.h>
+#include <teya/animation/AnimationAsset.h>
+#include <memory>
 
 namespace teya::editor {
 using RuntimeObjectId = std::uint64_t;
@@ -16,6 +18,10 @@ struct EditorFrameMetrics {
     std::string currentState, currentMap;
     int colliderCount = -1;
 };
+struct EditableAnimationAssetInfo { std::uint64_t id=0; std::string displayName; std::string assetPath; };
+struct AnimationWorkingCopyResult { std::shared_ptr<const teya::animation::AnimationAsset> asset; Texture2D texture{}; int textureWidth=0,textureHeight=0; std::string error; explicit operator bool()const{return asset!=nullptr;} };
+struct AnimationSaveResult { bool saved=false,applied=false; std::string error; explicit operator bool()const{return saved&&applied;} };
+struct AttachmentPreviewInfo { std::string socketName; Texture2D texture{}; Vector2 pivot{}; bool ownsTexture=false; };
 class EditorHost {
 public:
     virtual ~EditorHost() = default;
@@ -25,6 +31,14 @@ public:
     virtual std::vector<RuntimeNode> runtimeHierarchy() const = 0;
     virtual std::vector<RuntimeProperty> inspectObject(RuntimeObjectId id) const = 0;
     virtual EditorFrameMetrics frameMetrics() const = 0;
+    virtual std::vector<EditableAnimationAssetInfo> editableAnimationAssets() const { return {}; }
+    virtual AnimationWorkingCopyResult loadAnimationWorkingCopy(std::uint64_t) { return {}; }
+    virtual teya::animation::AnimationValidationResult validateEditableAnimation(const teya::animation::AnimationAsset& asset,int textureWidth,int textureHeight) const { return teya::animation::validateAnimationAsset(asset,textureWidth,textureHeight); }
+    virtual AnimationSaveResult saveAndApplyAnimationAsset(std::uint64_t,const teya::animation::AnimationAsset&) { return {false,false,"Animation authoring is unavailable"}; }
+    virtual AnimationSaveResult applyAnimationAssetWithoutSaving(std::uint64_t,const teya::animation::AnimationAsset&) { return {false,false,"Temporary apply is unavailable"}; }
+    virtual std::vector<AttachmentPreviewInfo> attachmentPreviews(std::uint64_t) const { return {}; }
+    virtual std::vector<std::string> animationEventSuggestions() const { return {"attack_started","attack_active","spawn_slash","attack_finished","play_sound","footstep"}; }
+    virtual std::vector<std::string> animationMarkerTypeSuggestions() const { return {"effect","sound","footstep","interaction","camera"}; }
     virtual void requestExit() = 0;
 };
 }

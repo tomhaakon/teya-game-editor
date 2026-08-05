@@ -22,6 +22,42 @@ Panels derive from `Panel`, own only presentation state, and communicate through
 screen positions only when inside the image rectangle; letterbox positions are
 rejected. This pure logic is covered by tests.
 
-A future standalone executable can implement `EditorHost` over IPC/shared texture
-transport without changing panels. Validated edit commands can later be added to
-the host interface; phase 1 is deliberately read-only and does not edit animation.
+## Animation authoring
+
+Open **View > Animation Editor** to edit the immutable `teya-2d` animation model.
+The host lists assets and returns an independent deep working copy plus a borrowed
+preview texture. Gameplay keeps its last validated immutable asset until Save or
+the explicitly temporary Apply Without Saving action succeeds.
+
+The panel provides an asset bar, clip list, playback preview, metadata inspector,
+validation navigation, and a horizontally scrolling frame timeline. Clips and
+frames can be added, duplicated, deleted, and reordered. Frame source, duration,
+sockets, attachment layers, events, hitboxes, and markers use the runtime types;
+the internal typed clipboard always makes deep copies. Undo/redo stores bounded
+asset snapshots, is cleared on asset load, and never retains vector references.
+
+Pixel Art mode defaults to nearest filtering, whole-pixel position snapping,
+integer preview zoom, optional pixel grid, and configurable owner/attachment
+rounding. Smooth mode defaults to linear filtering, arbitrary zoom and unrounded
+floating-point transforms. Changing mode retains authored decimal values. The
+same snapping helpers handle position, rotation and scale; left-facing display
+uses `teya-2d` mirroring and saved coordinates remain canonical right-facing.
+
+Grid sources expose dimensions, columns, sprite index, row/column and calculated
+source bounds. Atlas assets expose the runtime atlas-region list and deterministic
+region IDs. A missing texture disables only the visual preview, not metadata work.
+Preview playback uses a private `AnimationPlayer`; its fixed-capacity event log is
+editor-local and manual scrubbing emits no gameplay events.
+
+Save validates through the host, serializes through `teya-2d`, writes the normal
+asset path, then atomically replaces the runtime asset. Validation or write failure
+preserves both working and live data. Reload first asks before discarding dirty
+work and only installs a successfully loaded copy. Keyboard shortcuts are active
+only while the panel owns focus and no text field or modal is active: Space,
+arrows, Home/End, Ctrl+S, Ctrl+R, Ctrl+Z, Ctrl+Y/Ctrl+Shift+Z, Ctrl+D, F and G.
+
+Hosts implement the animation methods on `EditorHost`: enumerate assets, load a
+working copy and texture metadata, validate, save/apply, optionally temporary
+apply, supply attachment previews, and provide event/marker suggestions. Texture
+handles are borrowed unless explicitly marked owned and must remain valid until
+the next load or editor shutdown.

@@ -32,9 +32,9 @@ add_library(teya_game_editor STATIC
     ${imgui_SOURCE_DIR}/imgui_tables.cpp
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${rlimgui_SOURCE_DIR}/rlImGui.cpp
-    src/Editor.cpp src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp
+    src/Editor.cpp src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp src/AnimationDocument.cpp
     src/panels/GameViewPanel.cpp src/panels/HierarchyPanel.cpp
-    src/panels/InspectorPanel.cpp src/panels/PerformancePanel.cpp)
+    src/panels/InspectorPanel.cpp src/panels/PerformancePanel.cpp src/panels/AnimationEditorPanel.cpp)
 add_library(Teya::GameEditor ALIAS teya_game_editor)
 target_compile_features(teya_game_editor PUBLIC cxx_std_17)
 set_target_properties(teya_game_editor PROPERTIES CXX_EXTENSIONS OFF)
@@ -46,9 +46,9 @@ target_link_libraries(teya_game_editor PUBLIC Teya::Core Teya::2D raylib)
 if(TEYA_GAME_EDITOR_BUILD_TESTS)
     enable_testing()
     add_executable(teya_game_editor_tests tests/EditorTests.cpp
-        src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp)
+        src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp src/AnimationDocument.cpp)
     target_compile_features(teya_game_editor_tests PRIVATE cxx_std_17)
     target_include_directories(teya_game_editor_tests PRIVATE include)
-    target_link_libraries(teya_game_editor_tests PRIVATE Teya::Core)
+    target_link_libraries(teya_game_editor_tests PRIVATE Teya::Core Teya::2D)
     add_test(NAME teya_game_editor_tests COMMAND teya_game_editor_tests)
 endif()
