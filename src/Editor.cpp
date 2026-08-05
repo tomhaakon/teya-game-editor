@@ -69,8 +69,10 @@ void Editor::menu() {
             }
             ImGui::Separator();
             ImGui::MenuItem("Capture Game Input", nullptr, &context_.settings.captureGameInput);
-            ImGui::MenuItem("Show Player Origin", nullptr, false, false);
-            ImGui::MenuItem("Show Colliders", nullptr, false, false);
+            ImGui::MenuItem("Show Player Origin", nullptr, &context_.settings.showPlayerOrigin);
+            ImGui::MenuItem("Show Player Collider", nullptr,
+                            &context_.settings.showPlayerCollider);
+            ImGui::MenuItem("Show World Bounds", nullptr, &context_.settings.showWorldBounds);
             ImGui::EndMenu();
         }
         ImGui::EndMenuBar();

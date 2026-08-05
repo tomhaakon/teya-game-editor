@@ -25,6 +25,14 @@ struct EditorFrameMetrics {
     std::string currentState, currentMap;
     int colliderCount = -1;
 };
+struct EditorDebugDrawSettings {
+    bool showPlayerOrigin = false;
+    bool showPlayerCollider = false;
+    bool showWorldBounds = false;
+    bool showAnimationHitboxes = false;
+    bool showAnimationSockets = false;
+    bool showAnimationMarkers = false;
+};
 struct EditableAnimationAssetInfo {
     std::uint64_t id = 0;
     std::string displayName;
@@ -58,12 +66,19 @@ struct AttachmentPreviewInfo {
     std::string texturePath;
     Texture2D texture{};
     Vector2 pivot{};
+    Vector2 effectTip{};
     Vector2 positionOffset{};
     float rotationOffsetDegrees = 0.0f;
     Vector2 scale{1.0f, 1.0f};
     teya::animation::AttachmentLayer layer =
         teya::animation::AttachmentLayer::InFrontOfOwner;
     bool visible = true;
+    bool smoothRotationFiltering = false;
+    bool trailEnabled = true;
+    float trailLifetimeSeconds = 0.25f;
+    float trailWidth = 9.0f;
+    float trailOpacity = 0.45f;
+    float trailSmoothing = 0.35f;
     bool ownsTexture = false;
 };
 struct AttachmentObjectSaveResult {
@@ -80,6 +95,7 @@ class EditorHost {
     virtual std::vector<RuntimeNode> runtimeHierarchy() const = 0;
     virtual std::vector<RuntimeProperty> inspectObject(RuntimeObjectId id) const = 0;
     virtual EditorFrameMetrics frameMetrics() const = 0;
+    virtual void setDebugDrawSettings(const EditorDebugDrawSettings &) {}
     virtual std::vector<EditableAnimationAssetInfo> editableAnimationAssets() const { return {}; }
     virtual AnimationAssetOperationResult createAnimationAsset(std::string_view) {
         return {false, 0, "Asset creation is unavailable"};

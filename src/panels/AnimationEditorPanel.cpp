@@ -44,6 +44,17 @@ float clipDuration(const teya::animation::AnimationClip &c) {
         t += f.durationSeconds;
     return t;
 }
+Vector2 rotateAround(Vector2 point, Vector2 center, float degrees) {
+    const float radians = degrees * DEG2RAD;
+    const float cosine = std::cos(radians), sine = std::sin(radians);
+    const float x = point.x - center.x, y = point.y - center.y;
+    return {center.x + x * cosine - y * sine, center.y + x * sine + y * cosine};
+}
+Vector2 hitboxLocalPoint(Vector2 point, const teya::animation::AnimationHitbox &hitbox) {
+    const auto &bounds = hitbox.localBounds;
+    const Vector2 center{bounds.x + bounds.width * .5f, bounds.y + bounds.height * .5f};
+    return rotateAround(point, center, -hitbox.rotationDegrees);
+}
 } // namespace
 void AnimationEditorPanel::draw(EditorHost &host, EditorContext &) {
     TEYA_PROFILE_ZONE_NAMED("AnimationEditorPanel::draw");
@@ -621,9 +632,20 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
 }
 
 void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
-    ImGui::SetNextWindowSize({760, 560}, ImGuiCond_Appearing);
-    if (!ImGui::BeginPopupModal("Attachment Objects", nullptr, ImGuiWindowFlags_NoSavedSettings))
+    const auto &display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowSize(
+        {std::min(display.x - 40.0f, std::max(1240.0f, display.x * .78f)),
+         std::min(display.y - 40.0f, std::max(760.0f, display.y * .78f))},
+        ImGuiCond_FirstUseEver);
+    if (!ImGui::BeginPopupModal("Attachment Objects"))
         return;
+    if (ImGui::IsWindowAppearing()) {
+        attachmentObjects_ = host.attachmentPreviews(document_.assetId());
+        selectedAttachment_ = std::min(selectedAttachment_,
+                                       attachmentObjects_.empty() ? std::size_t{0}
+                                                                  : attachmentObjects_.size() - 1);
+        attachmentMessage_.clear();
+    }
     ImGui::TextDisabled("Reusable objects follow an animation socket. Changes apply when saved.");
     if (ImGui::Button("+ Object")) {
         AttachmentPreviewInfo object;
@@ -650,10 +672,11 @@ void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
                                                                   : attachmentObjects_.size() - 1);
     }
     ImGui::Separator();
-    if (ImGui::BeginTable("attachment-object-layout", 2, ImGuiTableFlags_Resizable |
+    if (ImGui::BeginTable("attachment-object-layout", 3, ImGuiTableFlags_Resizable |
                                                            ImGuiTableFlags_BordersInnerV)) {
-        ImGui::TableSetupColumn("Objects", ImGuiTableColumnFlags_WidthFixed, 190);
-        ImGui::TableSetupColumn("Object", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Objects", ImGuiTableColumnFlags_WidthFixed, 180);
+        ImGui::TableSetupColumn("Settings", ImGuiTableColumnFlags_WidthFixed, 390);
+        ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         for (std::size_t i = 0; i < attachmentObjects_.size(); ++i)
@@ -662,55 +685,98 @@ void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
         ImGui::TableNextColumn();
         if (selectedAttachment_ < attachmentObjects_.size()) {
             auto &object = attachmentObjects_[selectedAttachment_];
-            auto name = buffer<96>(object.name);
-            if (ImGui::InputText("Name", name.data(), name.size()))
-                object.name = name.data();
-            auto texturePath = buffer<256>(object.texturePath);
-            if (ImGui::InputText("Texture", texturePath.data(), texturePath.size()))
-                object.texturePath = texturePath.data();
-            auto socketName = buffer<96>(object.socketName);
-            if (ImGui::BeginCombo("Socket", object.socketName.c_str())) {
-                const auto &asset = document_.asset();
-                if (!asset.clips.empty() && !asset.clips[document_.selection().clip].frames.empty()) {
-                    const auto &sockets = asset.clips[document_.selection().clip]
-                                              .frames[document_.selection().frame]
-                                              .sockets;
-                    for (const auto &socket : sockets)
-                        if (ImGui::Selectable(socket.name.c_str(), socket.name == object.socketName))
-                            object.socketName = socket.name;
-                }
-                ImGui::EndCombo();
+            if (ImGui::CollapsingHeader("Identity")) {
+                auto name = buffer<96>(object.name);
+                if (ImGui::InputText("Name", name.data(), name.size()))
+                    object.name = name.data();
+                auto texturePath = buffer<256>(object.texturePath);
+                if (ImGui::InputText("Texture", texturePath.data(), texturePath.size()))
+                    object.texturePath = texturePath.data();
             }
-            if (ImGui::InputText("Socket name", socketName.data(), socketName.size()))
-                object.socketName = socketName.data();
-            ImGui::DragFloat2("Pivot", &object.pivot.x, .25f, 0, 0, "%.2f");
-            ImGui::DragFloat2("Position offset", &object.positionOffset.x, .25f, -1000, 1000,
-                              "%.2f");
-            ImGui::DragFloat("Rotation offset", &object.rotationOffsetDegrees, .25f, -360, 360,
-                             "%.2f deg");
-            ImGui::DragFloat2("Scale", &object.scale.x, .01f, .01f, 100, "%.3f");
-            ImGui::Checkbox("Visible", &object.visible);
-            ImGui::SeparatorText("Pivot preview");
+            if (ImGui::CollapsingHeader("Attachment Transform")) {
+                auto socketName = buffer<96>(object.socketName);
+                if (ImGui::BeginCombo("Socket", object.socketName.c_str())) {
+                    const auto &asset = document_.asset();
+                    if (!asset.clips.empty() &&
+                        !asset.clips[document_.selection().clip].frames.empty()) {
+                        const auto &sockets = asset.clips[document_.selection().clip]
+                                                  .frames[document_.selection().frame]
+                                                  .sockets;
+                        for (const auto &socket : sockets)
+                            if (ImGui::Selectable(socket.name.c_str(),
+                                                  socket.name == object.socketName))
+                                object.socketName = socket.name;
+                    }
+                    ImGui::EndCombo();
+                }
+                if (ImGui::InputText("Socket name", socketName.data(), socketName.size()))
+                    object.socketName = socketName.data();
+                ImGui::DragFloat2("Pivot", &object.pivot.x, .25f, 0, 0, "%.2f");
+                ImGui::DragFloat2("Effect tip", &object.effectTip.x, .25f, 0, 0, "%.2f");
+                ImGui::DragFloat2("Position offset", &object.positionOffset.x, .25f, -1000, 1000,
+                                  "%.2f");
+                ImGui::DragFloat("Rotation offset", &object.rotationOffsetDegrees, .25f, -360, 360,
+                                 "%.2f deg");
+                ImGui::DragFloat2("Scale", &object.scale.x, .01f, .01f, 100, "%.3f");
+            }
+            if (ImGui::CollapsingHeader("Rendering")) {
+                ImGui::Checkbox("Visible", &object.visible);
+                if (ImGui::Checkbox("Smooth rotation filtering",
+                                    &object.smoothRotationFiltering) &&
+                    IsTextureValid(object.texture))
+                    SetTextureFilter(object.texture, object.smoothRotationFiltering
+                                                         ? TEXTURE_FILTER_BILINEAR
+                                                         : TEXTURE_FILTER_POINT);
+            }
+            if (ImGui::CollapsingHeader("Sword Trail")) {
+                ImGui::Checkbox("Enabled", &object.trailEnabled);
+                ImGui::SliderFloat("Trail duration", &object.trailLifetimeSeconds, .05f, .75f,
+                                   "%.2f s");
+                ImGui::SliderFloat("Trail width", &object.trailWidth, 1.0f, 24.0f, "%.1f px");
+                ImGui::SliderFloat("Trail opacity", &object.trailOpacity, .05f, 1.0f, "%.2f");
+                ImGui::SliderFloat("Curve smoothing", &object.trailSmoothing, 0.0f, .9f, "%.2f");
+                ImGui::TextDisabled("Higher smoothing makes a rounder, more delayed arc.");
+            }
+            ImGui::TableNextColumn();
+            ImGui::SeparatorText("Pivot and effect tip");
+            if (ImGui::RadioButton("Edit hand pivot", !editAttachmentEffectTip_))
+                editAttachmentEffectTip_ = false;
+            ImGui::SameLine();
+            if (ImGui::RadioButton("Edit effect tip", editAttachmentEffectTip_))
+                editAttachmentEffectTip_ = true;
             if (IsTextureValid(object.texture)) {
-                const float maxSide = 220.0f;
-                const float scale = std::min(1.0f, maxSide / std::max(object.texture.width,
-                                                                      object.texture.height));
+                const auto previewSpace = ImGui::GetContentRegionAvail();
+                const float maxSide = std::max(160.0f, std::min(previewSpace.x, previewSpace.y - 50));
+                const float scale = std::max(1.0f, std::min(12.0f, maxSide /
+                    std::max(object.texture.width, object.texture.height)));
                 const ImVec2 size{object.texture.width * scale, object.texture.height * scale};
+                const float horizontalCenter = std::max(0.0f, (previewSpace.x - size.x) * .5f);
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + horizontalCenter);
                 ImGui::Image((ImTextureID)object.texture.id, size);
                 const auto imageMin = ImGui::GetItemRectMin();
                 const ImVec2 pivot{imageMin.x + object.pivot.x * scale,
                                    imageMin.y + object.pivot.y * scale};
+                const ImVec2 effectTip{imageMin.x + object.effectTip.x * scale,
+                                       imageMin.y + object.effectTip.y * scale};
                 auto *draw = ImGui::GetWindowDrawList();
-                draw->AddLine({pivot.x - 7, pivot.y}, {pivot.x + 7, pivot.y},
-                              IM_COL32(255, 220, 0, 255), 2);
-                draw->AddLine({pivot.x, pivot.y - 7}, {pivot.x, pivot.y + 7},
-                              IM_COL32(255, 220, 0, 255), 2);
+                const ImU32 pivotColor = editAttachmentEffectTip_
+                                             ? IM_COL32(255, 220, 0, 180)
+                                             : IM_COL32(255, 220, 0, 255);
+                const ImU32 tipColor = editAttachmentEffectTip_ ? IM_COL32(80, 220, 255, 255)
+                                                                 : IM_COL32(80, 220, 255, 180);
+                draw->AddLine({pivot.x - 7, pivot.y}, {pivot.x + 7, pivot.y}, pivotColor, 2);
+                draw->AddLine({pivot.x, pivot.y - 7}, {pivot.x, pivot.y + 7}, pivotColor, 2);
+                draw->AddCircle(effectTip, editAttachmentEffectTip_ ? 8.0f : 6.0f, tipColor, 0, 2);
                 if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
                     const auto mouse = ImGui::GetIO().MousePos;
-                    object.pivot = {(mouse.x - imageMin.x) / scale,
-                                    (mouse.y - imageMin.y) / scale};
+                    Vector2 selectedPoint{(mouse.x - imageMin.x) / scale,
+                                          (mouse.y - imageMin.y) / scale};
+                    if (editAttachmentEffectTip_)
+                        object.effectTip = selectedPoint;
+                    else
+                        object.pivot = selectedPoint;
                 }
-                ImGui::TextDisabled("Click the image at the point held by the hand.");
+                ImGui::TextWrapped("Yellow cross: hand pivot. Blue circle: effect tip. Select which point to edit, then click directly on the texture.");
             } else
                 ImGui::TextDisabled("Save a valid texture path to load the pivot preview.");
         }
@@ -726,6 +792,7 @@ void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
             selectedAttachment_ = std::min(selectedAttachment_,
                                            attachmentObjects_.empty() ? std::size_t{0}
                                                                       : attachmentObjects_.size() - 1);
+            ImGui::CloseCurrentPopup();
         }
     }
     ImGui::SameLine();
@@ -943,14 +1010,29 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             dl->AddText({p.x + 6, p.y - 8}, color, socket.name.c_str());
         }
     for (size_t i = 0; i < frame.hitboxes.size(); ++i) {
-        auto b = mirrored ? teya::animation::mirrorRectangle(frame.hitboxes[i].localBounds,
-                                                             source->width)
-                          : frame.hitboxes[i].localBounds;
+        const auto hitbox = mirrored ? teya::animation::mirrorHitbox(frame.hitboxes[i],
+                                                                     source->width)
+                                     : frame.hitboxes[i];
+        const auto &b = hitbox.localBounds;
         ImU32 c = s.kind == AnimationSelection::Kind::Hitbox && s.item == i
                       ? IM_COL32(255, 255, 0, 255)
                       : IM_COL32(255, 60, 60, 220);
-        dl->AddRect({min.x + b.x * z, min.y + b.y * z},
-                    {min.x + (b.x + b.width) * z, min.y + (b.y + b.height) * z}, c, 0, 0, 2);
+        const Vector2 center{b.x + b.width * .5f, b.y + b.height * .5f};
+        const Vector2 localCorners[] = {{b.x, b.y},
+                                        {b.x + b.width, b.y},
+                                        {b.x + b.width, b.y + b.height},
+                                        {b.x, b.y + b.height}};
+        std::array<ImVec2, 4> corners{};
+        for (std::size_t corner = 0; corner < corners.size(); ++corner) {
+            const auto rotated = rotateAround(localCorners[corner], center, hitbox.rotationDegrees);
+            corners[corner] = {min.x + rotated.x * z, min.y + rotated.y * z};
+        }
+        dl->AddPolyline(corners.data(), static_cast<int>(corners.size()), c,
+                        ImDrawFlags_Closed, 2.0f);
+        if (s.kind == AnimationSelection::Kind::Hitbox && s.item == i) {
+            const ImVec2 handle = mirrored ? corners[3] : corners[2];
+            dl->AddRectFilled({handle.x - 5, handle.y - 5}, {handle.x + 5, handle.y + 5}, c);
+        }
     }
     for (size_t i = 0; i < frame.markers.size(); ++i) {
         auto m = mirrored ? teya::animation::mirrorMarker(frame.markers[i], source->width)
@@ -969,6 +1051,21 @@ void AnimationEditorPanel::preview(EditorHost &host) {
     auto mouseLocal = [&] {
         return animationPreviewScreenToLocal(mouse, previewOrigin, {}, z, mirrored, source->width);
     };
+    const Vector2 hitTestLocal = mouseLocal();
+    bool mouseOverHitbox = false;
+    for (const auto &hitbox : frame.hitboxes) {
+        const auto &bounds = hitbox.localBounds;
+        const Vector2 unrotated = hitboxLocalPoint(hitTestLocal, hitbox);
+        const float left = std::min(bounds.x, bounds.x + bounds.width);
+        const float right = std::max(bounds.x, bounds.x + bounds.width);
+        const float top = std::min(bounds.y, bounds.y + bounds.height);
+        const float bottom = std::max(bounds.y, bounds.y + bounds.height);
+        if (unrotated.x >= left && unrotated.x <= right && unrotated.y >= top &&
+            unrotated.y <= bottom) {
+            mouseOverHitbox = true;
+            break;
+        }
+    }
     auto pointInTriangle = [](ImVec2 point, ImVec2 aPoint, ImVec2 bPoint, ImVec2 cPoint) {
         auto side = [](ImVec2 p, ImVec2 a, ImVec2 b) {
             return (p.x - b.x) * (a.y - b.y) - (a.x - b.x) * (p.y - b.y);
@@ -992,7 +1089,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             break;
         }
     }
-    if ((previewHovered || attachmentSocket) && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (!mouseOverHitbox && (previewHovered || attachmentSocket) &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
         if (showSockets_ && previewHovered)
@@ -1052,7 +1150,8 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             socketDragChanged_ = false;
         }
     }
-    if (previewHovered && !socketDragActive_ && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    if (!mouseOverHitbox && previewHovered && !socketDragActive_ &&
+        ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         float closestDistanceSquared = 12.0f * 12.0f;
         std::optional<std::size_t> closest;
         for (std::size_t i = 0; i < frame.markers.size(); ++i) {
@@ -1113,12 +1212,15 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         const Vector2 local = mouseLocal();
         for (std::size_t i = frame.hitboxes.size(); i-- > 0;) {
-            const auto &bounds = frame.hitboxes[i].localBounds;
+            const auto &hitbox = frame.hitboxes[i];
+            const auto &bounds = hitbox.localBounds;
+            const Vector2 unrotated = hitboxLocalPoint(local, hitbox);
             const float left = std::min(bounds.x, bounds.x + bounds.width);
             const float right = std::max(bounds.x, bounds.x + bounds.width);
             const float top = std::min(bounds.y, bounds.y + bounds.height);
             const float bottom = std::max(bounds.y, bounds.y + bounds.height);
-            if (local.x >= left && local.x <= right && local.y >= top && local.y <= bottom) {
+            if (unrotated.x >= left && unrotated.x <= right && unrotated.y >= top &&
+                unrotated.y <= bottom) {
                 playing_ = false;
                 previewPlayer_.pause();
                 s.kind = AnimationSelection::Kind::Hitbox;
@@ -1129,6 +1231,9 @@ void AnimationEditorPanel::preview(EditorHost &host) {
                 hitboxDragFrame_ = s.frame;
                 hitboxDragIndex_ = i;
                 hitboxDragBefore_ = a;
+                const float edgeTolerance = 7.0f / std::max(z, .001f);
+                hitboxResizeX_ = std::abs(unrotated.x - right) <= edgeTolerance;
+                hitboxResizeY_ = std::abs(unrotated.y - bottom) <= edgeTolerance;
                 hitboxDragOffset_ = {bounds.x - local.x, bounds.y - local.y};
                 break;
             }
@@ -1140,18 +1245,27 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         if (!targetStillValid) {
             hitboxDragActive_ = false;
             hitboxDragChanged_ = false;
+            hitboxResizeX_ = hitboxResizeY_ = false;
         } else if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             Vector2 position = mouseLocal();
-            position.x += hitboxDragOffset_.x;
-            position.y += hitboxDragOffset_.y;
             const bool snap = io.KeyShift || (a.authoring.snapPositions && !io.KeyAlt);
             const float increment = a.authoring.positionSnap > 0 ? a.authoring.positionSnap : 1.0f;
             position.x = snapAnimationValue(position.x, snap, increment);
             position.y = snapAnimationValue(position.y, snap, increment);
             auto &bounds = frame.hitboxes[hitboxDragIndex_].localBounds;
-            if (bounds.x != position.x || bounds.y != position.y) {
-                bounds.x = position.x;
-                bounds.y = position.y;
+            const Rectangle beforeBounds = bounds;
+            if (hitboxResizeX_ || hitboxResizeY_)
+                position = hitboxLocalPoint(position, frame.hitboxes[hitboxDragIndex_]);
+            if (hitboxResizeX_)
+                bounds.width = std::max(increment, position.x - bounds.x);
+            if (hitboxResizeY_)
+                bounds.height = std::max(increment, position.y - bounds.y);
+            if (!hitboxResizeX_ && !hitboxResizeY_) {
+                bounds.x = snapAnimationValue(position.x + hitboxDragOffset_.x, snap, increment);
+                bounds.y = snapAnimationValue(position.y + hitboxDragOffset_.y, snap, increment);
+            }
+            if (bounds.x != beforeBounds.x || bounds.y != beforeBounds.y ||
+                bounds.width != beforeBounds.width || bounds.height != beforeBounds.height) {
                 hitboxDragChanged_ = true;
             }
         } else {
@@ -1159,6 +1273,7 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             if (hitboxDragChanged_)
                 document_.mutate(hitboxDragBefore_);
             hitboxDragChanged_ = false;
+            hitboxResizeX_ = hitboxResizeY_ = false;
         }
     }
     if (ImGui::IsItemHovered() && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
@@ -1568,10 +1683,22 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
                 s.kind = AnimationSelection::Kind::Hitbox;
                 s.item = i;
                 auto before = a;
-                bool c = ImGui::InputFloat4("Bounds", &x.localBounds.x, "%.3f");
+                bool c = ImGui::DragFloat2("Position", &x.localBounds.x, .25f, -1000, 1000,
+                                           "%.2f");
+                c |= ImGui::DragFloat2("Size", &x.localBounds.width, .25f, .01f, 1000,
+                                       "%.2f");
+                c |= ImGui::InputFloat("Rotation", &x.rotationDegrees, 0, 0, "%.3f deg");
+                c |= ImGui::SliderFloat("Rotation slider", &x.rotationDegrees, -180.0f, 180.0f,
+                                        "%.1f deg");
+                x.localBounds.width = std::max(.01f, x.localBounds.width);
+                x.localBounds.height = std::max(.01f, x.localBounds.height);
                 c |= ImGui::Checkbox("Active", &x.active);
-                if (c)
+                if (c) {
+                    x.rotationDegrees =
+                        snapAnimationValue(x.rotationDegrees, a.authoring.snapRotation,
+                                           a.authoring.rotationSnapDegrees);
                     document_.mutate(before);
+                }
                 if (ImGui::Button("Propagate all"))
                     document_.propagateHitbox(i, 0, a.clips[s.clip].frames.size() - 1);
                 ImGui::SameLine();

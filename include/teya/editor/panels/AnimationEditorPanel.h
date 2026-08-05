@@ -58,6 +58,7 @@ class AnimationEditorPanel final : public Panel {
     std::vector<AttachmentPreviewInfo> attachmentObjects_;
     std::uint64_t attachmentAssetId_ = 0;
     std::size_t selectedAttachment_ = 0;
+    bool editAttachmentEffectTip_ = false;
     std::string attachmentMessage_;
     bool socketDragActive_ = false, socketDragChanged_ = false;
     std::size_t socketDragClip_ = 0, socketDragFrame_ = 0, socketDragIndex_ = 0;
@@ -68,6 +69,7 @@ class AnimationEditorPanel final : public Panel {
     Vector2 markerDragOffset_{};
     teya::animation::AnimationAsset markerDragBefore_;
     bool hitboxDragActive_ = false, hitboxDragChanged_ = false;
+    bool hitboxResizeX_ = false, hitboxResizeY_ = false;
     std::size_t hitboxDragClip_ = 0, hitboxDragFrame_ = 0, hitboxDragIndex_ = 0;
     Vector2 hitboxDragOffset_{};
     teya::animation::AnimationAsset hitboxDragBefore_;
