@@ -1,0 +1,5 @@
+#include "teya/editor/panels/PerformancePanel.h"
+#include "teya/editor/EditorContext.h"
+#include "teya/editor/EditorHost.h"
+#include <imgui.h>
+namespace teya::editor { void PerformancePanel::draw(EditorHost& h,EditorContext&){if(!open)return;if(ImGui::Begin("Performance",&open)){auto m=h.frameMetrics();frames_[offset_]=m.frameMilliseconds;offset_=(offset_+1)%Capacity;if(count_<Capacity)++count_;ImGui::Text("FPS: %.1f",m.fps);ImGui::Text("Frame: %.2f ms",m.frameMilliseconds);ImGui::Text("Game update: %.2f ms",m.updateMilliseconds);ImGui::Text("Game draw: %.2f ms",m.drawMilliseconds);ImGui::Text("Editor: %.2f ms",m.editorMilliseconds);ImGui::Text("Canvas: %d x %d",m.canvasWidth,m.canvasHeight);ImGui::Text("Game View: %d x %d (%.2fx)",m.imageWidth,m.imageHeight,m.gameViewScale);ImGui::Text("State: %s",m.currentState.c_str());if(!m.currentMap.empty())ImGui::Text("Map: %s",m.currentMap.c_str());if(m.colliderCount>=0)ImGui::Text("Colliders: %d",m.colliderCount);ImGui::PlotLines("Frame time",frames_.data(),count_,offset_,nullptr,0,40,{0,80});}ImGui::End();} }

@@ -1,0 +1,6 @@
+#include "teya/editor/EditorContext.h"
+#include "teya/editor/GameViewport.h"
+#include <cassert>
+#include <cmath>
+using namespace teya::editor;
+int main(){assert(GameViewport::scale(320,180,1000,700,false)==3);assert(std::abs(GameViewport::scale(320,180,500,500,true)-1.5625f)<.001f);auto r=GameViewport::centered(320,180,0,0,1000,700,false);assert(r.x==20&&r.y==80&&r.width==960&&r.height==540);assert(!GameViewport::screenToCanvas({0,0},r,320,180));auto p=GameViewport::screenToCanvas({500,350},r,320,180);assert(p&&std::abs(p->x-160)<.01f&&std::abs(p->y-90)<.01f);EditorSelection s;s.select(2);assert(s.reconcile({{2,0,"x"}}));assert(!s.reconcile({{3,0,"y"}})&&s.selected()==0);EditorContext c;c.pause();assert(!c.consumeSimulationStep());c.step();assert(c.consumeSimulationStep());assert(c.simulationMode()==SimulationMode::Paused);assert(!c.consumeSimulationStep());c.play();assert(c.consumeSimulationStep());assert(EditorContext::allowsGameInput({true,false,false,false,false,true,true,SimulationMode::Playing}));assert(!EditorContext::allowsGameInput({true,false,true,false,false,true,true,SimulationMode::Playing}));assert(!EditorContext::allowsGameInput({true,false,false,false,false,true,true,SimulationMode::Paused}));}
