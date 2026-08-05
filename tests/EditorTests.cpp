@@ -45,10 +45,18 @@ int main() {
     assert(selection.reconcile({{2, 0, "x"}}));
     assert(!selection.reconcile({{3, 0, "y"}}) && selection.selected() == 0);
     EditorContext context;
+    assert(context.simulationMode() == SimulationMode::Stopped);
+    assert(!context.consumeSimulationStep());
     context.pause(); context.step();
     assert(context.consumeSimulationStep());
     context.play();
     assert(context.consumeSimulationStep());
+    assert(EditorContext::allowsGameInput(
+        {true, false, true, true, false, true, false, SimulationMode::Playing}));
+    assert(!EditorContext::allowsGameInput(
+        {false, false, false, false, false, true, false, SimulationMode::Playing}));
+    assert(!EditorContext::allowsGameInput(
+        {true, false, false, false, true, true, false, SimulationMode::Playing}));
 
     auto asset = sampleAsset();
     AnimationDocument document;

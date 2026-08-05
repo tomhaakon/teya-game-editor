@@ -34,7 +34,8 @@ add_library(teya_game_editor STATIC
     ${rlimgui_SOURCE_DIR}/rlImGui.cpp
     src/Editor.cpp src/EditorContext.cpp src/EditorSelection.cpp src/GameViewport.cpp src/AnimationDocument.cpp
     src/panels/GameViewPanel.cpp src/panels/HierarchyPanel.cpp
-    src/panels/InspectorPanel.cpp src/panels/PerformancePanel.cpp src/panels/AnimationEditorPanel.cpp)
+    src/panels/InspectorPanel.cpp src/panels/PerformancePanel.cpp src/panels/AnimationEditorPanel.cpp
+    src/panels/ConsolePanel.cpp)
 add_library(Teya::GameEditor ALIAS teya_game_editor)
 target_compile_features(teya_game_editor PUBLIC cxx_std_17)
 set_target_properties(teya_game_editor PROPERTIES CXX_EXTENSIONS OFF)

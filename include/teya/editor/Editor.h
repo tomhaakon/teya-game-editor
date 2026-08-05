@@ -6,6 +6,8 @@
 #include "teya/editor/panels/InspectorPanel.h"
 #include "teya/editor/panels/PerformancePanel.h"
 #include "teya/editor/panels/AnimationEditorPanel.h"
+#include "teya/editor/panels/ConsolePanel.h"
+#include <optional>
 namespace teya::editor {
-class Editor { public: explicit Editor(EditorHost&); ~Editor(); Editor(const Editor&)=delete; Editor& operator=(const Editor&)=delete; bool initialize(); void shutdown(); void draw(); bool shouldUpdateGame(); bool gameInputEnabled() const; EditorContext& context(); private: void menu(); void toolbar(); void defaultLayout(); EditorHost& host_; EditorContext context_; GameViewPanel gameView_; HierarchyPanel hierarchy_; InspectorPanel inspector_; PerformancePanel performance_; AnimationEditorPanel animationEditor_; bool initialized_=false,showDemo_=false,firstLayout_=false; };
+class Editor { public: explicit Editor(EditorHost&); ~Editor(); Editor(const Editor&)=delete; Editor& operator=(const Editor&)=delete; bool initialize(); void shutdown(); void draw(); bool shouldUpdateGame(); bool gameInputEnabled() const; std::optional<Vector2> gamePointerCanvasPosition() const; EditorContext& context(); private: void menu(); void toolbar(); void defaultLayout(); EditorHost& host_; EditorContext context_; GameViewPanel gameView_; HierarchyPanel hierarchy_; InspectorPanel inspector_; PerformancePanel performance_; AnimationEditorPanel animationEditor_; ConsolePanel console_; bool initialized_=false,showDemo_=false,firstLayout_=false,focusGameView_=true; };
 }

@@ -39,6 +39,9 @@ public:
     virtual std::vector<AttachmentPreviewInfo> attachmentPreviews(std::uint64_t) const { return {}; }
     virtual std::vector<std::string> animationEventSuggestions() const { return {"attack_started","attack_active","spawn_slash","attack_finished","play_sound","footstep"}; }
     virtual std::vector<std::string> animationMarkerTypeSuggestions() const { return {"effect","sound","footstep","interaction","camera"}; }
+    virtual std::string editorLogPath() const { return {}; }
+    virtual void flushEditorLog() {}
+    virtual void requestGameRestart(bool pauseAfterRestart) { (void)pauseAfterRestart; }
     virtual void requestExit() = 0;
 };
 }
