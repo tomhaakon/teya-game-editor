@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <raylib.h>
 #include <string>
 #include <teya/animation/AnimationAsset.h>
@@ -32,6 +33,19 @@ struct EditorDebugDrawSettings {
     bool showAnimationHitboxes = false;
     bool showAnimationSockets = false;
     bool showAnimationMarkers = false;
+};
+struct EditableColliderInfo {
+    RuntimeObjectId objectId = 0;
+    std::string displayName;
+    Vector2 ownerOrigin{};
+    Vector2 offset{};
+    Vector2 size{};
+    bool saved = true;
+};
+struct ColliderEditResult {
+    bool success = false;
+    std::string error;
+    explicit operator bool() const { return success; }
 };
 struct EditableAnimationAssetInfo {
     std::uint64_t id = 0;
@@ -96,6 +110,18 @@ class EditorHost {
     virtual std::vector<RuntimeProperty> inspectObject(RuntimeObjectId id) const = 0;
     virtual EditorFrameMetrics frameMetrics() const = 0;
     virtual void setDebugDrawSettings(const EditorDebugDrawSettings &) {}
+    virtual std::optional<EditableColliderInfo> editableCollider(RuntimeObjectId) const {
+        return std::nullopt;
+    }
+    virtual ColliderEditResult applyEditableCollider(RuntimeObjectId, Vector2, Vector2) {
+        return {false, "Collider editing is unavailable"};
+    }
+    virtual ColliderEditResult saveEditableCollider(RuntimeObjectId) {
+        return {false, "Collider saving is unavailable"};
+    }
+    virtual ColliderEditResult reloadEditableCollider(RuntimeObjectId) {
+        return {false, "Collider reloading is unavailable"};
+    }
     virtual std::vector<EditableAnimationAssetInfo> editableAnimationAssets() const { return {}; }
     virtual AnimationAssetOperationResult createAnimationAsset(std::string_view) {
         return {false, 0, "Asset creation is unavailable"};

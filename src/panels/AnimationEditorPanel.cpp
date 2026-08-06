@@ -1803,7 +1803,19 @@ void AnimationEditorPanel::timeline() {
             previewPlayer_.setFrameForPreview(i);
             previewPlayer_.consumeEvents();
         }
-        ImGui::Text("%.3fs", c.frames[i].durationSeconds);
+        ImGui::SetNextItemWidth(88.0f);
+        float frameDuration = c.frames[i].durationSeconds;
+        if (ImGui::InputFloat("##frame-duration", &frameDuration, 0.0f, 0.0f, "%.3fs") &&
+            std::isfinite(frameDuration) && frameDuration > 0.0f) {
+            const auto before = a;
+            c.frames[i].durationSeconds = frameDuration;
+            s.frame = i;
+            document_.mutate(before);
+            previewPlayer_.setFrameForPreview(i);
+            previewPlayer_.consumeEvents();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Click to edit only frame %zu's duration.", i);
         ImGui::TextDisabled("S%d E%d H%d M%d", (int)c.frames[i].sockets.size(),
                             (int)c.frames[i].events.size(), (int)c.frames[i].hitboxes.size(),
                             (int)c.frames[i].markers.size());
