@@ -61,6 +61,15 @@ struct EditableMonster {
     Vector2 position{240.0f, 160.0f};
     Vector2 size{16.0f, 16.0f};
     Color tint{255, 0, 255, 255};
+    float moveSpeed = 20.0f;
+    int maxHealth = 3;
+    float stopDistance = 12.0f;
+    float attackRange = 18.0f;
+    float attackCooldown = 0.8f;
+    int attackDamage = 1;
+    float separationRadius = 14.0f;
+    float separationStrength = 30.0f;
+    float surroundRadius = 8.0f;
 };
 struct MonsterWorkingCopyResult {
     bool success = false;
@@ -74,6 +83,7 @@ struct EditableWorldInstance {
     EditableInstanceKind kind = EditableInstanceKind::Monster;
     std::uint64_t masterId = 0;
     Vector2 position{240.0f, 160.0f};
+    std::string name;
 };
 struct InstanceWorkingCopyResult {
     bool success = false;

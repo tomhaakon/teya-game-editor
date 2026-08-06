@@ -1,6 +1,7 @@
 #include "teya/editor/panels/InstanceEditorPanel.h"
 #include "teya/editor/EditorContext.h"
 #include <algorithm>
+#include <cstring>
 #include <imgui.h>
 namespace teya::editor {
 void InstanceEditorPanel::load(EditorHost &host) {
@@ -21,7 +22,7 @@ void InstanceEditorPanel::draw(EditorHost &host, EditorContext &) {
     });
     if (ImGui::Button("+ Player") && !hasPlayer) {
         std::uint64_t id = 1; for (const auto &i : instances_) id = std::max(id, i.id + 1);
-        instances_.push_back({id, EditableInstanceKind::Player, 0, {240, 165}});
+        instances_.push_back({id, EditableInstanceKind::Player, 0, {240, 165}, "Player"});
         selected_ = instances_.size() - 1; dirty_ = true;
     }
     if (hasPlayer && ImGui::IsItemHovered()) ImGui::SetTooltip("Only one Player is allowed");
@@ -29,7 +30,7 @@ void InstanceEditorPanel::draw(EditorHost &host, EditorContext &) {
     if (ImGui::Button("+ Monster") && !masters_.empty()) {
         std::uint64_t id = 1; for (const auto &i : instances_) id = std::max(id, i.id + 1);
         instances_.push_back({id, EditableInstanceKind::Monster, masters_.front().id,
-                              {240, 160}});
+                              {240, 160}, "Monster " + std::to_string(id)});
         selected_ = instances_.size() - 1; dirty_ = true;
     }
     ImGui::SameLine();
@@ -48,11 +49,10 @@ void InstanceEditorPanel::draw(EditorHost &host, EditorContext &) {
     ImGui::BeginChild("instance-list", {240, 0}, true);
     for (std::size_t index = 0; index < instances_.size(); ++index) {
         const auto &instance = instances_[index];
-        std::string label = instance.kind == EditableInstanceKind::Player ? "Player" : "Monster";
-        if (instance.kind == EditableInstanceKind::Monster)
-            if (const auto found = std::find_if(masters_.begin(), masters_.end(),
-                [&](const auto &m) { return m.id == instance.masterId; }); found != masters_.end())
-                label = found->name;
+        std::string label = instance.name.empty()
+                                ? (instance.kind == EditableInstanceKind::Player ? "Player"
+                                                                                : "Monster")
+                                : instance.name;
         label += " ##" + std::to_string(instance.id);
         if (ImGui::Selectable(label.c_str(), selected_ == index)) selected_ = index;
     }
@@ -63,6 +63,15 @@ void InstanceEditorPanel::draw(EditorHost &host, EditorContext &) {
         auto &instance = instances_[selected_];
         ImGui::TextUnformatted(instance.kind == EditableInstanceKind::Player ? "Player instance" : "Monster instance");
         bool changed = false;
+        if (nameBufferInstanceId_ != instance.id) {
+            nameBuffer_.fill('\0');
+            std::strncpy(nameBuffer_.data(), instance.name.c_str(), nameBuffer_.size() - 1);
+            nameBufferInstanceId_ = instance.id;
+        }
+        if (ImGui::InputText("Name", nameBuffer_.data(), nameBuffer_.size())) {
+            instance.name = nameBuffer_.data();
+            changed = true;
+        }
         if (instance.kind == EditableInstanceKind::Monster) {
             const auto current = std::find_if(masters_.begin(), masters_.end(),
                 [&](const auto &m) { return m.id == instance.masterId; });

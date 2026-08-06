@@ -58,10 +58,14 @@ void MonsterEditorPanel::draw(EditorHost &host, EditorContext &) {
         ImGui::PushID(static_cast<int>(monster.id));
         auto name = textBuffer<96>(monster.name);
         bool changed = false;
+        constexpr float TextFieldWidth = 420.0f;
+        constexpr float NumericFieldWidth = 300.0f;
+        ImGui::SetNextItemWidth(TextFieldWidth);
         if (ImGui::InputText("Name", name.data(), name.size())) { monster.name = name.data(); changed = true; }
         const char *animationLabel = monster.animationAssetPath.empty()
                                          ? "None (fallback square)"
                                          : monster.animationAssetPath.c_str();
+        ImGui::SetNextItemWidth(TextFieldWidth);
         if (ImGui::BeginCombo("Animation asset", animationLabel)) {
             if (ImGui::Selectable("None (fallback square)", monster.animationAssetPath.empty())) {
                 monster.animationAssetPath.clear(); changed = true;
@@ -74,9 +78,35 @@ void MonsterEditorPanel::draw(EditorHost &host, EditorContext &) {
             ImGui::EndCombo();
         }
         ImGui::TextDisabled("Create and edit assets in the Animation Editor.");
+        ImGui::PushItemWidth(NumericFieldWidth);
         changed |= ImGui::DragFloat2("Size", &monster.size.x, .5f, 1, 1000, "%.1f");
         monster.size.x = std::max(1.0f, monster.size.x);
         monster.size.y = std::max(1.0f, monster.size.y);
+        changed |= ImGui::DragFloat("Move speed", &monster.moveSpeed, .5f, 0, 500, "%.1f");
+        changed |= ImGui::InputInt("Health", &monster.maxHealth);
+        changed |= ImGui::DragFloat("Stop distance", &monster.stopDistance, .25f, 0, 500, "%.1f");
+        changed |= ImGui::DragFloat("Attack range", &monster.attackRange, .25f, 0, 500, "%.1f");
+        changed |= ImGui::DragFloat("Attack cooldown", &monster.attackCooldown, .05f, 0, 30,
+                                    "%.2f s");
+        changed |= ImGui::InputInt("Attack damage", &monster.attackDamage);
+        changed |= ImGui::DragFloat("Separation radius", &monster.separationRadius, .25f, 0,
+                                    500, "%.1f");
+        changed |= ImGui::DragFloat("Separation strength", &monster.separationStrength, .5f, 0,
+                                    1000, "%.1f");
+        changed |= ImGui::DragFloat("Surround radius", &monster.surroundRadius, .25f, 0, 500,
+                                    "%.1f");
+        ImGui::PopItemWidth();
+        monster.moveSpeed = std::max(0.0f, monster.moveSpeed);
+        monster.maxHealth = std::max(1, monster.maxHealth);
+        monster.stopDistance = std::max(0.0f, monster.stopDistance);
+        monster.attackRange = std::max(monster.stopDistance, monster.attackRange);
+        monster.attackCooldown = std::max(0.0f, monster.attackCooldown);
+        monster.attackDamage = std::max(0, monster.attackDamage);
+        monster.separationRadius = std::max(0.0f, monster.separationRadius);
+        monster.separationStrength = std::max(0.0f, monster.separationStrength);
+        monster.surroundRadius = std::max(0.0f, monster.surroundRadius);
+        ImGui::TextDisabled("Separation keeps nearby instances from stacking.");
+        ImGui::TextDisabled("Damage fires from the animation event: attack_active");
         ImGui::TextDisabled("Missing animations use the standard pink fallback.");
         dirty_ |= changed;
         if (ImGui::Button("Delete Monster")) {
