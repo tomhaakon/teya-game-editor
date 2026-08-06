@@ -46,6 +46,8 @@ void Editor::menu() {
             ImGui::MenuItem("Animation Timeline", nullptr, &animationEditor_.timelineOpen());
             ImGui::MenuItem("Assets", nullptr, &assets_.open);
             ImGui::MenuItem("Console", nullptr, &console_.open);
+            ImGui::MenuItem("Monsters", nullptr, &monsters_.open);
+            ImGui::MenuItem("Instances", nullptr, &instances_.open);
             ImGui::MenuItem("ImGui Demo Window", nullptr, &showDemo_);
             ImGui::EndMenu();
         }
@@ -123,6 +125,8 @@ void Editor::defaultLayout() {
     ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, .25f, &centerBottom, &center);
     ImGui::DockBuilderDockWindow("Hierarchy", left);
     ImGui::DockBuilderDockWindow("Assets", left);
+    ImGui::DockBuilderDockWindow("Monsters", left);
+    ImGui::DockBuilderDockWindow("Instances", left);
     ImGui::DockBuilderDockWindow("Animation Editor", center);
     ImGui::DockBuilderDockWindow("Game View", center);
     ImGui::DockBuilderDockWindow("Inspector", right);
@@ -166,6 +170,8 @@ void Editor::draw() {
     if (auto asset = assets_.consumeOpenRequest())
         animationEditor_.openAsset(host_, *asset);
     console_.draw(host_, context_);
+    monsters_.draw(host_, context_);
+    instances_.draw(host_, context_);
     if (focusGameView_) {
         ImGui::SetWindowFocus("Game View");
         focusGameView_ = false;

@@ -46,7 +46,6 @@ void AnimationAssetBrowserPanel::draw(EditorHost &host, EditorContext &) {
         std::strncpy(name_.data(), "new_animation", name_.size() - 1);
         modal_ = Modal::Create;
     }
-    ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##asset-search", "Search animations...", search_.data(),
                              search_.size());
@@ -60,12 +59,9 @@ void AnimationAssetBrowserPanel::draw(EditorHost &host, EditorContext &) {
         ImGui::TextColored(color, asset.valid ? "OK" : "ERR");
         ImGui::SameLine();
         const bool selected = selected_ && *selected_ == asset.id;
-        if (ImGui::Selectable(asset.displayName.c_str(), selected,
-                              ImGuiSelectableFlags_AllowDoubleClick)) {
+        if (ImGui::Selectable(asset.displayName.c_str(), selected)) {
             selected_ = asset.id;
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                openRequest_ = asset.id;
-            }
+            openRequest_ = asset.id;
         }
         if (ImGui::BeginPopupContextItem("asset-actions")) {
             if (ImGui::MenuItem("Open"))
@@ -87,15 +83,6 @@ void AnimationAssetBrowserPanel::draw(EditorHost &host, EditorContext &) {
                 modal_ = Modal::Delete;
             }
             ImGui::EndPopup();
-        }
-        if (selected) {
-            ImGui::Indent();
-            ImGui::TextDisabled("%s", asset.assetPath.c_str());
-            if (asset.errorCount || asset.warningCount)
-                ImGui::TextDisabled("%d errors, %d warnings", asset.errorCount, asset.warningCount);
-            if (asset.runtimeAsset)
-                ImGui::TextDisabled("Used by running game");
-            ImGui::Unindent();
         }
         ImGui::PopID();
     }

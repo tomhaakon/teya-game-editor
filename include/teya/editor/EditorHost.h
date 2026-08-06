@@ -47,6 +47,40 @@ struct ColliderEditResult {
     std::string error;
     explicit operator bool() const { return success; }
 };
+struct EditableGroundShadowInfo {
+    RuntimeObjectId objectId = 0;
+    bool visible = true;
+    Vector2 offset{};
+    Vector2 size{16.0f, 6.0f};
+    Color color{0, 0, 0, 105};
+};
+struct EditableMonster {
+    std::uint64_t id = 0;
+    std::string name = "Monster";
+    std::string animationAssetPath;
+    Vector2 position{240.0f, 160.0f};
+    Vector2 size{16.0f, 16.0f};
+    Color tint{255, 0, 255, 255};
+};
+struct MonsterWorkingCopyResult {
+    bool success = false;
+    std::vector<EditableMonster> monsters;
+    std::string error;
+    explicit operator bool() const { return success; }
+};
+enum class EditableInstanceKind { Player, Monster };
+struct EditableWorldInstance {
+    std::uint64_t id = 0;
+    EditableInstanceKind kind = EditableInstanceKind::Monster;
+    std::uint64_t masterId = 0;
+    Vector2 position{240.0f, 160.0f};
+};
+struct InstanceWorkingCopyResult {
+    bool success = false;
+    std::vector<EditableWorldInstance> instances;
+    std::string error;
+    explicit operator bool() const { return success; }
+};
 struct EditableAnimationAssetInfo {
     std::uint64_t id = 0;
     std::string displayName;
@@ -92,6 +126,7 @@ struct AttachmentPreviewInfo {
     float trailLifetimeSeconds = 0.25f;
     float trailWidth = 9.0f;
     float trailOpacity = 0.45f;
+    Color trailColor{255, 255, 255, 255};
     float trailSmoothing = 0.35f;
     bool ownsTexture = false;
 };
@@ -121,6 +156,26 @@ class EditorHost {
     }
     virtual ColliderEditResult reloadEditableCollider(RuntimeObjectId) {
         return {false, "Collider reloading is unavailable"};
+    }
+    virtual std::optional<EditableGroundShadowInfo> editableGroundShadow(RuntimeObjectId) const {
+        return std::nullopt;
+    }
+    virtual ColliderEditResult applyEditableGroundShadow(RuntimeObjectId, bool, Vector2, Vector2,
+                                                          Color) {
+        return {false, "Ground shadow editing is unavailable"};
+    }
+    virtual MonsterWorkingCopyResult loadEditableMonsters() {
+        return {false, {}, "Monster editing is unavailable"};
+    }
+    virtual ColliderEditResult saveAndApplyEditableMonsters(const std::vector<EditableMonster> &) {
+        return {false, "Monster editing is unavailable"};
+    }
+    virtual InstanceWorkingCopyResult loadEditableWorldInstances() {
+        return {false, {}, "Instance editing is unavailable"};
+    }
+    virtual ColliderEditResult
+    saveAndApplyWorldInstances(const std::vector<EditableWorldInstance> &) {
+        return {false, "Instance editing is unavailable"};
     }
     virtual std::vector<EditableAnimationAssetInfo> editableAnimationAssets() const { return {}; }
     virtual AnimationAssetOperationResult createAnimationAsset(std::string_view) {

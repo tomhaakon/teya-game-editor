@@ -7,6 +7,8 @@
 #include "teya/editor/panels/GameViewPanel.h"
 #include "teya/editor/panels/HierarchyPanel.h"
 #include "teya/editor/panels/InspectorPanel.h"
+#include "teya/editor/panels/MonsterEditorPanel.h"
+#include "teya/editor/panels/InstanceEditorPanel.h"
 #include "teya/editor/panels/PerformancePanel.h"
 #include <optional>
 namespace teya::editor {
@@ -37,6 +39,8 @@ class Editor {
     AnimationEditorPanel animationEditor_;
     AnimationAssetBrowserPanel assets_;
     ConsolePanel console_;
+    MonsterEditorPanel monsters_;
+    InstanceEditorPanel instances_;
     bool initialized_ = false, showDemo_ = false, firstLayout_ = false, focusGameView_ = true;
 };
 } // namespace teya::editor

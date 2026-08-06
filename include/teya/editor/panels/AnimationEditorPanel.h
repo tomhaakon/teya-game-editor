@@ -37,7 +37,7 @@ class AnimationEditorPanel final : public Panel {
     void atlasPicker();
     void timeline();
     void frameCollections(EditorHost &, teya::animation::AnimationFrame &);
-    bool loaded_ = false, active_ = false, timelineOpen_ = true, playing_ = false, fit_ = false,
+    bool loaded_ = false, active_ = false, timelineOpen_ = true, playing_ = false, fit_ = true,
          showGrid_ = true, showSockets_ = true, onionPrevious_ = false, onionNext_ = false;
     float zoom_ = 4, opacity_ = .25f;
     Vector2 pan_{};

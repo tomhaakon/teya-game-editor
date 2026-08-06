@@ -65,8 +65,6 @@ void AnimationEditorPanel::draw(EditorHost &host, EditorContext &) {
     active_ = mainVisible;
     if (mainVisible) {
         assets_ = host.editableAnimationAssets();
-        if (!loaded_ && !assets_.empty())
-            load(host, assets_[0].id);
         assetBar(host);
         if (loaded_) {
             syncPreview();
@@ -116,7 +114,7 @@ void AnimationEditorPanel::load(EditorHost &h, std::uint64_t id) {
     textureHeight_ = result.textureHeight;
     loaded_ = true;
     showGrid_ = document_.asset().authoring.showPixelGridByDefault;
-    fit_ = false;
+    fit_ = true;
     zoom_ = 4.0f;
     sheetSelection_.clear();
     sheetSelectionAnchor_ = -1;
@@ -569,28 +567,11 @@ void AnimationEditorPanel::assetBar(EditorHost &h) {
     }
     const auto it = std::find_if(assets_.begin(), assets_.end(),
                                  [&](auto &a) { return a.id == document_.assetId(); });
-    const char *current = it == assets_.end() ? "Select asset" : it->displayName.c_str();
-    ImGui::TextDisabled("Animation asset");
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##animation-asset", current)) {
-        for (auto &a : assets_) {
-            bool selected = a.id == document_.assetId();
-            if (ImGui::Selectable(a.displayName.c_str(), selected)) {
-                // Selecting the current item only closes the combo. Reloading
-                // here replaces the document while this popup is still using
-                // its state and is both unnecessary and unsafe.
-                if (selected) {
-                    ImGui::CloseCurrentPopup();
-                } else if (document_.dirty())
-                    message_ = "Save or Reload before switching dirty assets";
-                else
-                    load(h, a.id);
-            }
-            if (selected)
-                ImGui::SetItemDefaultFocus();
-        }
-        ImGui::EndCombo();
+    if (!loaded_) {
+        ImGui::TextDisabled("Select an animation in the Assets panel.");
+        return;
     }
+    ImGui::Text("Animation: %s", it == assets_.end() ? "Unknown" : it->displayName.c_str());
     if (loaded_)
         ImGui::TextColored(document_.dirty() ? ImVec4(1, .7f, .2f, 1) : ImVec4(.4f, 1, .4f, 1),
                            document_.dirty() ? "Dirty *" : "Saved");
@@ -734,8 +715,17 @@ void AnimationEditorPanel::attachmentObjects(EditorHost &host) {
                                    "%.2f s");
                 ImGui::SliderFloat("Trail width", &object.trailWidth, 1.0f, 24.0f, "%.1f px");
                 ImGui::SliderFloat("Trail opacity", &object.trailOpacity, .05f, 1.0f, "%.2f");
+                float trailColor[3] = {object.trailColor.r / 255.0f,
+                                       object.trailColor.g / 255.0f,
+                                       object.trailColor.b / 255.0f};
+                if (ImGui::ColorEdit3("Trail color", trailColor))
+                    object.trailColor = {
+                        static_cast<unsigned char>(std::clamp(trailColor[0], 0.0f, 1.0f) * 255),
+                        static_cast<unsigned char>(std::clamp(trailColor[1], 0.0f, 1.0f) * 255),
+                        static_cast<unsigned char>(std::clamp(trailColor[2], 0.0f, 1.0f) * 255),
+                        255};
                 ImGui::SliderFloat("Curve smoothing", &object.trailSmoothing, 0.0f, .9f, "%.2f");
-                ImGui::TextDisabled("Higher smoothing makes a rounder, more delayed arc.");
+                ImGui::TextDisabled("Higher smoothing rounds the path without delaying the tip.");
             }
             ImGui::TableNextColumn();
             ImGui::SeparatorText("Pivot and effect tip");
@@ -868,6 +858,14 @@ void AnimationEditorPanel::preview(EditorHost &host) {
                            "Preview texture/source unavailable; metadata remains editable");
         return;
     }
+    if (!ImGui::BeginTable("preview-and-controls", 2,
+                           ImGuiTableFlags_Resizable | ImGuiTableFlags_BordersInnerV))
+        return;
+    ImGui::TableSetupColumn("Preview", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Preview Controls", ImGuiTableColumnFlags_WidthFixed, 245.0f);
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(1);
+    ImGui::SeparatorText("Preview Controls");
     if (ImGui::Button(playing_ ? "Pause" : "Play")) {
         playing_ = !playing_;
         if (playing_) {
@@ -885,13 +883,11 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         previewPlayer_.consumeEvents();
     }
     ImGui::Checkbox("Fit", &fit_);
-    ImGui::SameLine();
     ImGui::Checkbox("Grid", &showGrid_);
-    ImGui::SameLine();
     ImGui::Checkbox("Show sockets", &showSockets_);
     ImGui::Checkbox("Prev onion", &onionPrevious_);
-    ImGui::SameLine();
     ImGui::Checkbox("Next onion", &onionNext_);
+    ImGui::SetNextItemWidth(-1);
     ImGui::SliderFloat("Onion opacity", &opacity_, 0, .8f, "%.2f");
     bool pixel = a.render.mode == teya::animation::AnimationRenderMode::PixelArt;
     if (pixel && a.authoring.preferIntegerPreviewScale) {
@@ -901,14 +897,35 @@ void AnimationEditorPanel::preview(EditorHost &host) {
         for (int i = 0; i < 5; ++i)
             if ((int)zoom_ == opts[i])
                 current = i;
+        ImGui::SetNextItemWidth(-1);
         if (ImGui::Combo("Zoom", &current, values, 5)) {
             zoom_ = (float)opts[current];
             fit_ = false;
         }
     } else {
+        ImGui::SetNextItemWidth(-1);
         if (ImGui::SliderFloat("Zoom", &zoom_, .05f, 16, "%.2fx"))
             fit_ = false;
     }
+    if (ImGui::Button("Preview Event Log..."))
+        ImGui::OpenPopup("Preview Event Log");
+    if (ImGui::BeginPopup("Preview Event Log")) {
+        if (ImGui::Button("Clear events"))
+            eventLog_.clear();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Preview only");
+        ImGui::Separator();
+        if (eventLog_.empty())
+            ImGui::TextDisabled("No preview events");
+        for (auto &event : eventLog_)
+            ImGui::BulletText("%.3f %s[%zu] %s %s", event.previewTime,
+                              event.event.clipName.c_str(), event.event.frameIndex,
+                              event.event.name.c_str(), event.event.payload.c_str());
+        ImGui::Separator();
+        ImGui::TextDisabled("Manual scrubbing does not add events.");
+        ImGui::EndPopup();
+    }
+    ImGui::TableSetColumnIndex(0);
     auto avail = ImGui::GetContentRegionAvail();
     float fitScale =
         std::min(avail.x / source->width, std::max(1.f, avail.y - 50) / source->height);
@@ -982,6 +999,39 @@ void AnimationEditorPanel::preview(EditorHost &host) {
                              textureTopRight, textureBottomRight, textureBottomLeft);
         }
     };
+    auto drawOnionFrame = [&](std::size_t frameIndex, ImU32 tint) {
+        const auto onionSource =
+            teya::animation::animationSourceRectangle(a, clip.frames[frameIndex]);
+        if (!onionSource)
+            return;
+        const ImVec2 onionUv0{
+            (mirrored ? onionSource->x + onionSource->width : onionSource->x) / texture_.width,
+            onionSource->y / texture_.height};
+        const ImVec2 onionUv1{
+            (mirrored ? onionSource->x : onionSource->x + onionSource->width) / texture_.width,
+            (onionSource->y + onionSource->height) / texture_.height};
+        dl->AddImage((ImTextureID)texture_.id, min, max, onionUv0, onionUv1, tint);
+    };
+    const auto onionAlpha = static_cast<unsigned char>(std::clamp(opacity_, 0.0f, .8f) * 255);
+    if (onionPrevious_ && clip.frames.size() > 1) {
+        const std::size_t previous = s.frame > 0 ? s.frame - 1 : clip.frames.size() - 1;
+        drawOnionFrame(previous, IM_COL32(90, 210, 255, onionAlpha));
+    }
+    if (onionNext_ && clip.frames.size() > 1) {
+        const std::size_t next = (s.frame + 1) % clip.frames.size();
+        drawOnionFrame(next, IM_COL32(255, 105, 190, onionAlpha));
+    }
+    const auto &shadow = a.render.groundShadow;
+    if (shadow.enabled && shadow.color.a > 0) {
+        const ImVec2 center{min.x + source->width * .5f * z + shadow.offset.x * z,
+                            min.y + source->height * z + shadow.offset.y * z};
+        const ImU32 color = IM_COL32(shadow.color.r, shadow.color.g, shadow.color.b,
+                                     shadow.color.a);
+        const ImU32 edge = IM_COL32(shadow.color.r, shadow.color.g, shadow.color.b,
+                                    static_cast<unsigned char>(shadow.color.a * .28f));
+        dl->AddEllipseFilled(center, {shadow.size.x * .58f * z, shadow.size.y * .68f * z}, edge);
+        dl->AddEllipseFilled(center, {shadow.size.x * .5f * z, shadow.size.y * .5f * z}, color);
+    }
     drawAttachmentLayer(teya::animation::AttachmentLayer::BehindOwner);
     ImGui::Image((ImTextureID)texture_.id, size, uv0, uv1);
     min = ImGui::GetItemRectMin();
@@ -1293,23 +1343,33 @@ void AnimationEditorPanel::preview(EditorHost &host) {
             eventLog_.push_back({e, previewPlayer_.clipElapsed()});
         }
     }
-    ImGui::Text("Frame %zu/%zu  Time %.3f / %.3f", s.frame + 1, clip.frames.size(),
-                previewPlayer_.clipElapsed(), clipDuration(clip));
-    if (ImGui::CollapsingHeader("Preview Event Log")) {
-        if (ImGui::Button("Clear events"))
-            eventLog_.clear();
-        ImGui::SameLine();
-        ImGui::TextDisabled("Scrubbing never dispatches gameplay events");
-        for (auto &e : eventLog_)
-            ImGui::BulletText("%.3f %s[%zu] %s %s", e.previewTime, e.event.clipName.c_str(),
-                              e.event.frameIndex, e.event.name.c_str(), e.event.payload.c_str());
-    }
+    char frameStatus[160]{};
+    std::snprintf(frameStatus, sizeof(frameStatus), "Frame %zu/%zu  Time %.3f / %.3f",
+                  s.frame + 1, clip.frames.size(), previewPlayer_.clipElapsed(),
+                  clipDuration(clip));
+    const ImVec2 statusSize = ImGui::CalcTextSize(frameStatus);
+    const ImVec2 statusCursor = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(
+        {std::max(min.x, (min.x + max.x - statusSize.x) * .5f), statusCursor.y});
+    ImGui::TextUnformatted(frameStatus);
+    ImGui::EndTable();
 }
 void AnimationEditorPanel::inspector(EditorHost &host) {
     auto &a = document_.asset();
     auto &s = document_.selection();
     if (ImGui::CollapsingHeader("Asset")) {
         ImGui::Text("Schema %d", a.schemaVersion);
+        const auto assetInfo = std::find_if(assets_.begin(), assets_.end(), [&](const auto &entry) {
+            return entry.id == document_.assetId();
+        });
+        if (assetInfo != assets_.end()) {
+            ImGui::TextWrapped("Asset path: %s", assetInfo->assetPath.c_str());
+            if (assetInfo->runtimeAsset)
+                ImGui::TextColored({.4f, 1.0f, .5f, 1.0f}, "Used by running game");
+            if (assetInfo->errorCount || assetInfo->warningCount)
+                ImGui::TextDisabled("%d errors, %d warnings", assetInfo->errorCount,
+                                    assetInfo->warningCount);
+        }
         auto texturePath = buffer<256>(a.texturePath);
         auto before = a;
         if (ImGui::InputText("Texture path", texturePath.data(), texturePath.size())) {
@@ -1367,6 +1427,28 @@ void AnimationEditorPanel::inspector(EditorHost &host) {
         changed |= ImGui::Checkbox("Pixel grid default", &a.authoring.showPixelGridByDefault);
         changed |= ImGui::Checkbox("Round owner", &a.render.roundOwnerPosition);
         changed |= ImGui::Checkbox("Round attachments", &a.render.roundAttachmentPositions);
+        ImGui::SeparatorText("Ground Shadow");
+        changed |= ImGui::Checkbox("Enable ground shadow", &a.render.groundShadow.enabled);
+        changed |= ImGui::DragFloat2("Shadow offset", &a.render.groundShadow.offset.x, .25f,
+                                     -1000, 1000, "%.2f");
+        changed |= ImGui::DragFloat2("Shadow size", &a.render.groundShadow.size.x, .25f, .25f,
+                                     1000, "%.2f");
+        a.render.groundShadow.size.x = std::max(.25f, a.render.groundShadow.size.x);
+        a.render.groundShadow.size.y = std::max(.25f, a.render.groundShadow.size.y);
+        float shadowColor[4] = {a.render.groundShadow.color.r / 255.0f,
+                                a.render.groundShadow.color.g / 255.0f,
+                                a.render.groundShadow.color.b / 255.0f,
+                                a.render.groundShadow.color.a / 255.0f};
+        if (ImGui::ColorEdit4("Shadow color", shadowColor,
+                              ImGuiColorEditFlags_AlphaBar |
+                                  ImGuiColorEditFlags_AlphaPreviewHalf)) {
+            a.render.groundShadow.color = {
+                static_cast<unsigned char>(std::clamp(shadowColor[0], 0.0f, 1.0f) * 255),
+                static_cast<unsigned char>(std::clamp(shadowColor[1], 0.0f, 1.0f) * 255),
+                static_cast<unsigned char>(std::clamp(shadowColor[2], 0.0f, 1.0f) * 255),
+                static_cast<unsigned char>(std::clamp(shadowColor[3], 0.0f, 1.0f) * 255)};
+            changed = true;
+        }
         if (changed)
             document_.mutate(before);
         if (a.sourceMode == teya::animation::AnimationFrameSourceMode::SpriteSheetGrid) {
@@ -1591,7 +1673,8 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
         for (size_t i = 0; i < f.sockets.size(); ++i) {
             ImGui::PushID((int)i);
             auto &x = f.sockets[i];
-            if (ImGui::TreeNode(x.name.c_str())) {
+            const std::string socketTreeLabel = x.name + "###socket-details";
+            if (ImGui::TreeNode(socketTreeLabel.c_str())) {
                 s.kind = AnimationSelection::Kind::Socket;
                 s.item = i;
                 auto before = a;
@@ -1679,7 +1762,8 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
         for (size_t i = 0; i < f.hitboxes.size(); ++i) {
             ImGui::PushID((int)i);
             auto &x = f.hitboxes[i];
-            if (ImGui::TreeNode(x.name.c_str())) {
+            const std::string hitboxTreeLabel = x.name + "###hitbox-details";
+            if (ImGui::TreeNode(hitboxTreeLabel.c_str())) {
                 s.kind = AnimationSelection::Kind::Hitbox;
                 s.item = i;
                 auto before = a;
@@ -1724,7 +1808,8 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
         for (size_t i = 0; i < f.markers.size(); ++i) {
             ImGui::PushID((int)i);
             auto &x = f.markers[i];
-            if (ImGui::TreeNode(x.name.c_str())) {
+            const std::string markerTreeLabel = x.name + "###marker-details";
+            if (ImGui::TreeNode(markerTreeLabel.c_str())) {
                 s.kind = AnimationSelection::Kind::Marker;
                 s.item = i;
                 auto before = a;
@@ -1764,30 +1849,46 @@ void AnimationEditorPanel::timeline() {
         return;
     auto &c = a.clips[s.clip];
     ImGui::SeparatorText("Timeline");
-    if (ImGui::Button("Previous") && !c.frames.empty()) {
-        s.frame = s.frame ? s.frame - 1 : c.frames.size() - 1;
-        previewPlayer_.setFrameForPreview(s.frame);
+    if (ImGui::BeginTable("timeline-toolbar", 3)) {
+        ImGui::TableSetupColumn("Frame actions", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Navigation", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+        ImGui::TableSetupColumn("Balance", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Button("+ Frame"))
+            document_.addFrame();
+        ImGui::SameLine();
+        if (ImGui::Button("Duplicate"))
+            document_.duplicateFrame();
+        ImGui::SameLine();
+        if (ImGui::Button("Delete"))
+            document_.deleteFrame();
+        ImGui::SameLine();
+        if (ImGui::Button("Move Left"))
+            document_.moveFrame(-1);
+        ImGui::SameLine();
+        if (ImGui::Button("Move Right"))
+            document_.moveFrame(1);
+
+        ImGui::TableSetColumnIndex(1);
+        const float navigationWidth = ImGui::CalcTextSize("Previous").x +
+                                      ImGui::CalcTextSize("Next").x +
+                                      ImGui::GetStyle().FramePadding.x * 4.0f +
+                                      ImGui::GetStyle().ItemSpacing.x;
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                             std::max(0.0f, (ImGui::GetContentRegionAvail().x - navigationWidth) *
+                                                .5f));
+        if (ImGui::Button("Previous") && !c.frames.empty()) {
+            s.frame = s.frame ? s.frame - 1 : c.frames.size() - 1;
+            previewPlayer_.setFrameForPreview(s.frame);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Next") && !c.frames.empty()) {
+            s.frame = (s.frame + 1) % c.frames.size();
+            previewPlayer_.setFrameForPreview(s.frame);
+        }
+        ImGui::EndTable();
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Next") && !c.frames.empty()) {
-        s.frame = (s.frame + 1) % c.frames.size();
-        previewPlayer_.setFrameForPreview(s.frame);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("+ Frame"))
-        document_.addFrame();
-    ImGui::SameLine();
-    if (ImGui::Button("Duplicate"))
-        document_.duplicateFrame();
-    ImGui::SameLine();
-    if (ImGui::Button("Delete"))
-        document_.deleteFrame();
-    ImGui::SameLine();
-    if (ImGui::Button("Move Left"))
-        document_.moveFrame(-1);
-    ImGui::SameLine();
-    if (ImGui::Button("Move Right"))
-        document_.moveFrame(1);
     ImGui::BeginChild("frame-timeline", {0, 105}, true, ImGuiWindowFlags_HorizontalScrollbar);
     float start = 0;
     for (size_t i = 0; i < c.frames.size(); ++i) {
