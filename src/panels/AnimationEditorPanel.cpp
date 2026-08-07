@@ -1723,20 +1723,42 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
         }
     }
     if (ImGui::CollapsingHeader("Events")) {
+        const auto eventSuggestions = host.animationEventSuggestions();
         if (ImGui::Button("+ Event")) {
             auto before = a;
-            f.events.push_back({"event", {}});
+            f.events.push_back({eventSuggestions.empty() ? "event" : eventSuggestions.front(), {}});
             document_.mutate(before);
         }
         for (size_t i = 0; i < f.events.size(); ++i) {
             ImGui::PushID((int)i);
             auto before = a;
-            auto nb = buffer<96>(f.events[i].name);
             auto pb = buffer<160>(f.events[i].payload);
-            bool c = ImGui::InputText("Name", nb.data(), nb.size());
+            bool c = false;
+            const bool knownEvent = std::find(eventSuggestions.begin(), eventSuggestions.end(),
+                                              f.events[i].name) != eventSuggestions.end();
+            ImGui::SetNextItemWidth(260.0f);
+            if (ImGui::BeginCombo("Event", knownEvent ? f.events[i].name.c_str() : "Custom...")) {
+                for (const auto &suggestion : eventSuggestions)
+                    if (ImGui::Selectable(suggestion.c_str(), f.events[i].name == suggestion)) {
+                        f.events[i].name = suggestion;
+                        c = true;
+                    }
+                ImGui::Separator();
+                if (ImGui::Selectable("Custom...", !knownEvent)) {
+                    f.events[i].name = "custom_event";
+                    c = true;
+                }
+                ImGui::EndCombo();
+            }
+            if (!knownEvent) {
+                auto nb = buffer<96>(f.events[i].name);
+                if (ImGui::InputText("Custom name", nb.data(), nb.size())) {
+                    f.events[i].name = nb.data();
+                    c = true;
+                }
+            }
             c |= ImGui::InputText("Payload", pb.data(), pb.size());
             if (c) {
-                f.events[i].name = nb.data();
                 f.events[i].payload = pb.data();
                 document_.mutate(before);
             }
@@ -1750,8 +1772,7 @@ void AnimationEditorPanel::frameCollections(EditorHost &host, teya::animation::A
             }
             ImGui::PopID();
         }
-        ImGui::TextDisabled("Suggestions: attack_started, attack_active, spawn_slash, "
-                            "attack_finished, play_sound, footstep");
+        ImGui::TextDisabled("Use attack_active for the frame that deals damage.");
     }
     if (ImGui::CollapsingHeader("Hitboxes")) {
         if (ImGui::Button("+ Hitbox")) {

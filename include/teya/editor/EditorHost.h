@@ -91,6 +91,24 @@ struct InstanceWorkingCopyResult {
     std::string error;
     explicit operator bool() const { return success; }
 };
+enum class GameplaySettingType { Boolean, Integer, Float };
+struct GameplaySetting {
+    std::string key, label;
+    GameplaySettingType type = GameplaySettingType::Float;
+    bool boolValue = false;
+    int intValue = 0;
+    float floatValue = 0.0f, minimum = 0.0f, maximum = 100.0f, step = 0.1f;
+};
+struct CustomGameplayFeature {
+    std::uint64_t id = 0;
+    std::string name;
+    bool enabled = false;
+    std::vector<GameplaySetting> settings;
+};
+struct GameplayDiagnostic { std::string label, value; };
+struct GameplayAction {
+    std::string key, label;
+};
 struct EditableAnimationAssetInfo {
     std::uint64_t id = 0;
     std::string displayName;
@@ -186,6 +204,18 @@ class EditorHost {
     virtual ColliderEditResult
     saveAndApplyWorldInstances(const std::vector<EditableWorldInstance> &) {
         return {false, "Instance editing is unavailable"};
+    }
+    virtual std::vector<CustomGameplayFeature> customGameplayFeatures() const { return {}; }
+    virtual std::vector<GameplayDiagnostic> customGameplayDiagnostics(std::uint64_t) const {
+        return {};
+    }
+    virtual std::vector<GameplayAction> customGameplayActions(std::uint64_t) const { return {}; }
+    virtual ColliderEditResult invokeCustomGameplayAction(std::uint64_t, std::string_view) {
+        return {false, "Custom gameplay action is unavailable"};
+    }
+    virtual ColliderEditResult
+    saveAndApplyCustomGameplayFeature(const CustomGameplayFeature &) {
+        return {false, "Custom gameplay editing is unavailable"};
     }
     virtual std::vector<EditableAnimationAssetInfo> editableAnimationAssets() const { return {}; }
     virtual AnimationAssetOperationResult createAnimationAsset(std::string_view) {

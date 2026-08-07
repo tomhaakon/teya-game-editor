@@ -4,6 +4,7 @@
 #include "teya/editor/panels/AnimationAssetBrowserPanel.h"
 #include "teya/editor/panels/AnimationEditorPanel.h"
 #include "teya/editor/panels/ConsolePanel.h"
+#include "teya/editor/panels/CustomGameplayPanel.h"
 #include "teya/editor/panels/GameViewPanel.h"
 #include "teya/editor/panels/HierarchyPanel.h"
 #include "teya/editor/panels/InspectorPanel.h"
@@ -41,6 +42,7 @@ class Editor {
     ConsolePanel console_;
     MonsterEditorPanel monsters_;
     InstanceEditorPanel instances_;
+    CustomGameplayPanel customGameplay_;
     bool initialized_ = false, showDemo_ = false, firstLayout_ = false, focusGameView_ = true;
 };
 } // namespace teya::editor

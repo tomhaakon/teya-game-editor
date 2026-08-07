@@ -48,6 +48,7 @@ void Editor::menu() {
             ImGui::MenuItem("Console", nullptr, &console_.open);
             ImGui::MenuItem("Monsters", nullptr, &monsters_.open);
             ImGui::MenuItem("Instances", nullptr, &instances_.open);
+            ImGui::MenuItem("Custom Gameplay", nullptr, &customGameplay_.open);
             ImGui::MenuItem("ImGui Demo Window", nullptr, &showDemo_);
             ImGui::EndMenu();
         }
@@ -127,6 +128,7 @@ void Editor::defaultLayout() {
     ImGui::DockBuilderDockWindow("Assets", left);
     ImGui::DockBuilderDockWindow("Monsters", left);
     ImGui::DockBuilderDockWindow("Instances", left);
+    ImGui::DockBuilderDockWindow("Custom Gameplay", left);
     ImGui::DockBuilderDockWindow("Animation Editor", center);
     ImGui::DockBuilderDockWindow("Game View", center);
     ImGui::DockBuilderDockWindow("Inspector", right);
@@ -172,6 +174,7 @@ void Editor::draw() {
     console_.draw(host_, context_);
     monsters_.draw(host_, context_);
     instances_.draw(host_, context_);
+    customGameplay_.draw(host_, context_);
     if (focusGameView_) {
         ImGui::SetWindowFocus("Game View");
         focusGameView_ = false;
